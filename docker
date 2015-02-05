@@ -122,6 +122,9 @@ echo \\\$PRETTY_NAME
 exit 0
 OVT_LSB_RELEASE_INIT_SCRIPT
 sudo chmod 755 /tmp/open-vm-tools/usr/local/bin/lsb_release
+sudo mkdir -p /tmp/open-vm-tools/etc/vmware-tools/scripts/vmware
+sudo curl -L -q -o /tmp/open-vm-tools/etc/vmware-tools/scripts/vmware/network https://raw.githubusercontent.com/vmware/boot2docker/ovt/rootfs/rootfs/etc/vmware-tools/scripts/vmware/network
+sudo chmod 755 /tmp/open-vm-tools/etc/vmware-tools/scripts/vmware/network
 cd /tmp
 sudo mksquashfs libdnet /mnt/sda1/var/lib/boot2docker/tcz/libdnet.tcz
 sudo mksquashfs open-vm-tools /mnt/sda1/var/lib/boot2docker/tcz/open-vm-tools.tcz
@@ -149,8 +152,8 @@ echo -e "\033[0;32mRebooting\033[0m"
 sudo reboot
 
 DOCKER_INIT
-        sleep 60
-        echo -e "\033[0;32mReady\033[0m"
+		sleep 60
+		echo -e "\033[0;32mReady\033[0m"
 	;;
 	clean)
 		echo "Cleaning ALL up docker images"
@@ -171,6 +174,9 @@ DOCKER_INIT
 	;;
 	down)
 		"$SCRIPT" vmops stop hard
+	;;
+	reboot)
+	    "$SCRIPT" ssh sudo reboot
 	;;
 	download)
 GET_LATEST_BOOT2DOCKER_TAG="$(
@@ -210,6 +216,6 @@ EOF
 		fi
 	;;
 	*)
-		ssh $SSH_OPTIONS $SSH_DOCKER_HOST docker "$@"
+		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- docker "$@"
 	;;
 esac
