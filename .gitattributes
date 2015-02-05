@@ -1,0 +1,7 @@
+docker				eol=lf
+
+*.vmsd				binary
+*.vmxf				binary
+*.vmx				binary
+*.vmdk				binary
+*.tar.gz			binary

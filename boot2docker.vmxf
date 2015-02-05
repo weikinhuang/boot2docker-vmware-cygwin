@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<Foundry>
+<VM>
+<VMId type="string">52 99 4a b9 15 5c 14 84-df 79 25 58 fa 90 fe 72</VMId>
+<ClientMetaData>
+<clientMetaDataAttributes/>
+<HistoryEventList/></ClientMetaData>
+<vmxPathName type="string">boot2docker.vmx</vmxPathName></VM></Foundry>
