@@ -72,30 +72,75 @@ sudo mkfs.ext4 -L boot2docker-data /dev/sda1
 sudo mkdir /mnt/sda1
 sudo mount -t ext4 /dev/sda1 /mnt/sda1
 sudo mkdir -p /mnt/sda1/var/lib/boot2docker
+
 echo -e "\033[0;32mPushing ssh keys\033[0m"
 mkdir /home/docker/.ssh
 chmod 700 /home/docker/.ssh
 touch /home/docker/.ssh/authorized_keys
+sudo touch /mnt/sda1/var/lib/boot2docker/.ash_history
+sudo chown docker /mnt/sda1/var/lib/boot2docker/.ash_history
 chmod 600 /home/docker/.ssh/authorized_keys
 cat /home/docker/.ssh/authorized_keys | grep "$ID_RSA_PUB" || echo "$ID_RSA_PUB" >> /home/docker/.ssh/authorized_keys
 WORKING_DIR="\$(pwd)"
 cd /home/docker
-sudo tar -cf /mnt/sda1/var/lib/boot2docker/userdata.tar .ssh
+ln -sf /var/lib/boot2docker/.ash_history .ash_history
+sudo tar -cf /mnt/sda1/var/lib/boot2docker/userdata.tar .ssh .ash_history
 cd "\$WORKING_DIR"
+
+echo search localdomain > /etc/resolv.conf
+echo nameserver 8.8.8.8 >> /etc/resolv.conf
+echo nameserver 8.8.4.4 >> /etc/resolv.conf
+
 echo -e "\033[0;32mDownloading additional modules\033[0m"
 sudo mkdir -p /mnt/sda1/var/lib/boot2docker/tcz
-sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/cifs-utils.tcz \$TCL_REPO_BASE/x86/tcz/cifs-utils.tcz
+
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/cifs-utils.tcz \$TCL_REPO_BASE/tcz/cifs-utils.tcz
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/htop.tcz \$TCL_REPO_BASE/tcz/htop.tcz
+
+echo -e "\033[0;32mDownloading open vmware tools\033[0m"
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/procps.tcz \$TCL_REPO_BASE/tcz/procps.tcz
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/glib2.tcz \$TCL_REPO_BASE/tcz/glib2.tcz
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/libtirpc.tcz \$TCL_REPO_BASE/tcz/libtirpc.tcz
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/libffi.tcz \$TCL_REPO_BASE/tcz/libffi.tcz
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/ncurses-common.tcz \$TCL_REPO_BASE/tcz/ncurses-common.tcz
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/ncurses-terminfo.tcz \$TCL_REPO_BASE/tcz/ncurses-terminfo.tcz
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/ncurses-utils.tcz \$TCL_REPO_BASE/tcz/ncurses-utils.tcz
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/ncurses.tcz \$TCL_REPO_BASE/tcz/ncurses.tcz
+
+sudo curl -L -q -o /tmp/squashfs-tools-4.x.tcz \$TCL_REPO_BASE/tcz/squashfs-tools-4.x.tcz
+tce-load -i /tmp/squashfs-tools-4.x.tcz
+sudo mkdir /tmp/libdnet
+sudo mkdir /tmp/open-vm-tools
+curl -L https://github.com/vmware/tcl-container/releases/download/v9.4.6/libdnet.tgz | sudo tar -C /tmp/libdnet -xz
+curl -L https://github.com/vmware/tcl-container/releases/download/v9.4.6/open-vm-tools.tgz | sudo tar -C /tmp/open-vm-tools -xz
+sudo tee /tmp/open-vm-tools/usr/local/bin/lsb_release << OVT_LSB_RELEASE_INIT_SCRIPT
+#!/bin/sh
+# just to make open-vm-tools happy, nad fake output
+# of lsb_release -sd
+. /etc/os-release
+echo \\\$PRETTY_NAME
+exit 0
+OVT_LSB_RELEASE_INIT_SCRIPT
+sudo chmod 755 /tmp/open-vm-tools/usr/local/bin/lsb_release
+cd /tmp
+sudo mksquashfs libdnet /mnt/sda1/var/lib/boot2docker/tcz/libdnet.tcz
+sudo mksquashfs open-vm-tools /mnt/sda1/var/lib/boot2docker/tcz/open-vm-tools.tcz
+cd "\$WORKING_DIR"
 
 echo -e "\033[0;32mInstalling local boot script\033[0m"
 sudo tee /mnt/sda1/var/lib/boot2docker/bootlocal.sh << BOOT2DOCKER_INIT_SCRIPT
 #!/bin/sh
 
 mkdir /mnt/datashare &>/dev/null || true
-tce-load -i /var/lib/boot2docker/tcz/*.tcz
+
+su - docker -c 'tce-load -i /var/lib/boot2docker/tcz/*.tcz'
 
 echo search localdomain > /etc/resolv.conf
 echo nameserver 8.8.8.8 >> /etc/resolv.conf
 echo nameserver 8.8.4.4 >> /etc/resolv.conf
+
+/usr/local/bin/vmtoolsd --background /var/run/vmtoolsd.pid
+
 BOOT2DOCKER_INIT_SCRIPT
 
 sudo chmod 755 /mnt/sda1/var/lib/boot2docker/bootlocal.sh
