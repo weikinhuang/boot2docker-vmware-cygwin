@@ -12,56 +12,170 @@ VMPATH='D:\Documents and Settings\My Documents\Virtual Machines\boot2docker\boot
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
 FORWARDS_TMP_FILE=/tmp/docker-ssh-forward-pids
 
-case "$1" in
-	ssh)
-		shift
-		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- "$@"
-	;;
-	cifs)
-		# http://blog.tutum.co/2014/11/05/how-to-use-docker-on-windows/
-		echo -ne "\033[0;32mEnter CIFS share password: \033[0m"
-		read -s -p "" CIFS_PASSWORD
-		echo
-		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- "sudo mount -tcifs '-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777' '//${BOOT2DOCKER_NAT_HOST}/$2' /mnt/datashare"
-	;;
-	forward)
-		ssh -N -L $2:$BOOT2DOCKER_HOST:$2 $SSH_OPTIONS $SSH_DOCKER_HOST >/dev/null 2>&1 &
-		SSHPID=$!
-		if [[ $? == 0 ]]; then
-			echo $SSHPID >> $FORWARDS_TMP_FILE
-			echo "Forwarding port $2 with pid $SSHPID"
-		else
-			echo "Failed to forward port $2"
-		fi
-	;;
-	killforwards)
-        cat $FORWARDS_TMP_FILE | xargs -I{} sh -c 'if /usr/bin/ps -p "{}" | grep -v STIME | grep /usr/bin/ssh &>/dev/null; then kill {}; fi'
-        echo > $FORWARDS_TMP_FILE
-	;;
-	get)
-		scp -r $SSH_OPTIONS $SSH_DOCKER_HOST:"$2" "${3-.}"
-	;;
-	put)
-		scp -r $SSH_OPTIONS "${2}" $SSH_DOCKER_HOST:"${3-/home/docker/}"
-	;;
-	initvm)
-	    "$SCRIPT" createvm
-	    "$SCRIPT" up
-	    sleep 120
-	    "$SCRIPT" init
-	;;
-	createvm)
-		mkdir -p "$VMDIR"
-		curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmxf" > "$VMDIR/boot2docker.vmxf"
-		curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmx" > "$VMDIR/boot2docker.vmx"
-		curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmsd" > "$VMDIR/boot2docker.vmsd"
-		curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.tar.gz" | tar -zxO > "$VMDIR/boot2docker.vmdk"
-		"$SCRIPT" download
-	;;
-	destroyvm)
-	    "$SCRIPT" down
-		rm -rf "$VMDIR"
-	;;
+function docker-ssh () {
+    ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- "$@"
+}
+
+function docker-mount-cifs () {
+    local CIFS_PASSWORD
+    local LOCAL_FOLDER="$1"
+    local REMOTE_FOLDER="${2-/mnt/datashare}"
+    # http://blog.tutum.co/2014/11/05/how-to-use-docker-on-windows/
+    echo -ne "\033[0;32mEnter CIFS share password: \033[0m"
+    read -s -p "" CIFS_PASSWORD
+    echo
+    docker-ssh "sudo mount -tcifs '-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777' '//${BOOT2DOCKER_NAT_HOST}/$LOCAL_FOLDER' '$REMOTE_FOLDER'"
+}
+
+function docker-forward-port () {
+    local FWD_PORT=$2
+    if [[ -z $FWD_PORT ]]; then
+        echo "Port required!"
+        return 1
+    fi
+
+    ssh -N -L $FWD_PORT:$BOOT2DOCKER_HOST:$FWD_PORT $SSH_OPTIONS $SSH_DOCKER_HOST >/dev/null 2>&1 &
+    local SSHPID=$!
+    local SSH_EXIT=$?
+    if [[ $SSH_EXIT == 0 ]]; then
+        echo $SSHPID >> $FORWARDS_TMP_FILE
+        echo "Forwarding port $2 with pid $SSHPID"
+    else
+        echo "Failed to forward port $2"
+    fi
+    return $SSH_EXIT
+}
+
+function docker-kill-forwards () {
+    cat $FORWARDS_TMP_FILE | xargs -I{} sh -c 'if /usr/bin/ps -p "{}" | grep -v STIME | grep /usr/bin/ssh &>/dev/null; then kill {}; fi'
+    echo > $FORWARDS_TMP_FILE
+}
+
+function docker-get () {
+    local TARGET="$1"
+    local DEST="${2-.}"
+    scp -r $SSH_OPTIONS $SSH_DOCKER_HOST:"$TARGET" "$DEST"
+}
+
+function docker-put () {
+    local TARGET="$1"
+    local DEST="${2-/home/docker/}"
+    scp -r $SSH_OPTIONS "$TARGET" $SSH_DOCKER_HOST:"${DEST}"
+}
+
+function docker-create-vm () {
+    mkdir -p "$VMDIR"
+    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmxf" > "$VMDIR/boot2docker.vmxf"
+    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmx" > "$VMDIR/boot2docker.vmx"
+    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmsd" > "$VMDIR/boot2docker.vmsd"
+    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.tar.gz" | tar -zxO > "$VMDIR/boot2docker.vmdk"
+}
+
+function docker-destroy-vm () {
+    "$SCRIPT" down
+    rm -rf "$VMDIR"
+}
+
+function docker-vmrun () {
+    local VM_CMD=$1
+    shift
+    "$(cygpath -u "$VMRUN_PATH")" -T ws $VM_CMD "$(cygpath -w "$VMPATH")" "$@"
+}
+
+function docker-ip () {
+    docker-vmrun getGuestIPAddress -wait
+}
+
+function docker-vmup () {
+    docker-vmrun start nogui
+}
+
+function docker-vmdown () {
+    docker-kill-forwards
+    docker-vmrun vmops stop hard
+}
+
+function docker-reboot () {
+    docker-kill-forwards
+    docker-ssh sudo reboot
+}
+
+function docker-download-iso () {
+GET_LATEST_BOOT2DOCKER_TAG="$(
+cat << EOF
+require("https").get({
+	host: "api.github.com",
+	path: "/repos/boot2docker/boot2docker/releases",
+	headers: {"user-agent": "boot2docker-latest"}
+}, function(response) {
+	var body = "";
+	response.on("data", function(d) { body += d; });
+	response.on("end", function() {
+		try {
+			console.log(JSON.parse(body).reduce(function(p, c) { return (!(/^v\d+\.\d+\.\d+/).test(c.name) || p > c.name) ? p : c.name; }, "v0.0.0"));
+		} catch (e) {
+			console.error(e.message);
+		}
+	});
+});
+EOF
+)"
+    ISO_PATH="$VMDIR/boot2docker.iso"
+    LATEST_BOOT2DOCKER_TAG="$(node -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
+    if [[ -n "$LATEST_BOOT2DOCKER_TAG" ]] && [[ "$LATEST_BOOT2DOCKER_TAG" != "v0.0.0" ]]; then
+        echo "Downloading boot2docker $LATEST_BOOT2DOCKER_TAG..."
+        curl -L --progress-bar "https://github.com/boot2docker/boot2docker/releases/download/${LATEST_BOOT2DOCKER_TAG}/boot2docker.iso" > "$ISO_PATH.new"
+        if [[ $? == 0 ]]; then
+            rm -f "$ISO_PATH" || true
+            mv "$ISO_PATH.new" "$ISO_PATH"
+            echo "Downloaded boot2docker $LATEST_BOOT2DOCKER_TAG!"
+        else
+            echo "Failed to download!"
+            exit 1
+        fi
+    else
+        exit 1
+    fi
+}
+
+SHELL_DOCKER_ACTION="$1"
+shift
+case "$SHELL_DOCKER_ACTION" in
+    ssh)
+        docker-ssh
+    ;;
+    cifs)
+        docker-mount-cifs "$@"
+    ;;
+    forward)
+        if docker-forward-port "$@"; then
+            echo "Forwarding port $2 with pid $SSHPID"
+        else
+            echo "Failed to forward port $2"
+        fi
+    ;;
+    killforwards)
+        docker-kill-forwards
+    ;;
+    get)
+        docker-get "$@"
+    ;;
+    put)
+        docker-put "$@"
+    ;;
+    initvm)
+        "$SCRIPT" createvm
+        "$SCRIPT" up
+        sleep 120
+        "$SCRIPT" init
+    ;;
+    createvm)
+        docker-create-vm
+        docker-download-iso
+    ;;
+    destroyvm)
+        docker-destroy-vm
+    ;;
 	init)
 		# http://odewahn.github.io/docker-jumpstart/boot2docker.html
 		# http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
@@ -172,65 +286,26 @@ DOCKER_INIT
 		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- 'docker rm $(docker ps -a | grep Exited | awk "{ print $1 }")'
 		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- 'docker rmi $(docker images -aq)'
 	;;
-	vmops)
-		VM_CMD=$2
-		shift
-		shift
-		"$(cygpath -u "$VMRUN_PATH")" -T ws $VM_CMD "$(cygpath -w "$VMPATH")" "$@"
+    vmrun)
+        docker-vmrun "$@"
 	;;
 	ip)
-		"$SCRIPT" vmops getGuestIPAddress -wait
+		docker-ip
 	;;
 	up)
-		"$SCRIPT" vmops start nogui
+		docker-vmup
 	;;
 	down)
-	    "$SCRIPT" killforwards
-		"$SCRIPT" vmops stop hard
+	    docker-vmdown
 	;;
 	reboot)
-	    "$SCRIPT" killforwards
-	    "$SCRIPT" ssh sudo reboot
+	    docker-reboot
 	;;
 	download)
-GET_LATEST_BOOT2DOCKER_TAG="$(
-cat << EOF
-require("https").get({
-	host: "api.github.com",
-	path: "/repos/boot2docker/boot2docker/releases",
-	headers: {"user-agent": "boot2docker-latest"}
-}, function(response) {
-	var body = "";
-	response.on("data", function(d) { body += d; });
-	response.on("end", function() {
-		try {
-			console.log(JSON.parse(body).reduce(function(p, c) { return (!(/^v\d+\.\d+\.\d+/).test(c.name) || p > c.name) ? p : c.name; }, "v0.0.0"));
-		} catch (e) {
-			console.error(e.message);
-		}
-	});
-});
-EOF
-)"
-		ISO_PATH="$VMDIR/boot2docker.iso"
-		LATEST_BOOT2DOCKER_TAG="$(node -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
-		if [[ -n "$LATEST_BOOT2DOCKER_TAG" ]] && [[ "$LATEST_BOOT2DOCKER_TAG" != "v0.0.0" ]]; then
-			echo "Downloading boot2docker $LATEST_BOOT2DOCKER_TAG..."
-			curl -L --progress-bar "https://github.com/boot2docker/boot2docker/releases/download/${LATEST_BOOT2DOCKER_TAG}/boot2docker.iso" > "$ISO_PATH.new"
-			if [[ $? == 0 ]]; then
-				rm -f "$ISO_PATH" || true
-				mv "$ISO_PATH.new" "$ISO_PATH"
-				echo "Downloaded boot2docker $LATEST_BOOT2DOCKER_TAG!"
-			else
-				echo "Failed to download!"
-				exit 1
-			fi
-		else
-			exit 1
-		fi
+        docker-download-iso
 	;;
 	*)
 	    # default run docker command on remote host
-		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- docker "$@"
+	    docker-ssh docker "$@"
 	;;
 esac
