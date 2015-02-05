@@ -1,0 +1,136 @@
+#!/bin/bash
+
+SCRIPT="$0"
+
+BOOT2DOCKER_NAT_PREFIX=192.168.126
+BOOT2DOCKER_NAT_HOST=${BOOT2DOCKER_NAT_PREFIX}.1
+BOOT2DOCKER_HOST=${BOOT2DOCKER_NAT_PREFIX}.130
+SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+SSH_DOCKER_HOST="docker@${BOOT2DOCKER_HOST}"
+VMRUN_PATH='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
+VMPATH='D:\Documents and Settings\My Documents\Virtual Machines\boot2docker\boot2docker.vmx'
+
+case "$1" in
+	ssh)
+		shift
+		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- "$@"
+	;;
+	cifs)
+		# http://blog.tutum.co/2014/11/05/how-to-use-docker-on-windows/
+		read -s -p "Enter CIFS share password: " CIFS_PASSWORD
+		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- "sudo mount -tcifs '-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777' '//${BOOT2DOCKER_NAT_HOST}/$2' /mnt/datashare"
+	;;
+	forward)
+		ssh -N -L $2:$BOOT2DOCKER_HOST:$2 $SSH_OPTIONS $SSH_DOCKER_HOST >/dev/null 2>&1 &
+		echo $!
+	;;
+	get)
+		scp -r $SSH_OPTIONS $SSH_DOCKER_HOST:"$2" "${3-.}"
+	;;
+	put)
+		scp -r $SSH_OPTIONS "${2}" $SSH_DOCKER_HOST:"${3-~/}"
+	;;
+	init)
+BOOT2DOCKER_INIT_SCRIPT=$(
+cat << EOF
+#!/bin/sh
+
+mkdir /mnt/datashare &>/dev/null || true
+tce-load -i /var/lib/boot2docker/cifs-utils.tcz
+
+echo search localdomain > /etc/resolv.conf
+echo nameserver 8.8.8.8 >> /etc/resolv.conf
+echo nameserver 8.8.4.4 >> /etc/resolv.conf
+
+EOF
+)
+		
+		# http://odewahn.github.io/docker-jumpstart/boot2docker.html
+		# http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
+
+		echo "Default password is 'tcuser'"
+		echo
+		echo -n "Setting up persistent storage                  " 
+		cat ~/.ssh/id_rsa.pub | ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- 'ID_RSA_PUB="$(cat -)"; ( mkdir ~/.ssh; chmod 700 ~/.ssh; touch ~/.ssh/authorized_keys; chmod 600  ~/.ssh/authorized_keys ) &>/dev/null; cat ~/.ssh/authorized_keys | grep "$ID_RSA_PUB" || echo "$ID_RSA_PUB" >> ~/.ssh/authorized_keys'
+		ssh $SSH_OPTIONS $SSH_DOCKER_HOST 'if ! blkid -c /dev/null | grep boot2docker-data &>/dev/null; then echo -e "n\np\n1\n\n\nw\n" | sudo fdisk /dev/sda; sudo mkfs.ext4 -L boot2docker-data /dev/sda1; fi'
+		if [[ $? == 0 ]]; then echo -e "[\033[0;32m OK \033[0m]"; else echo -e "[\033[0;31mFAIL\033[0m]"; fi
+
+		echo -n "Rebooting                                       "
+		ssh $SSH_OPTIONS $SSH_DOCKER_HOST 'sudo reboot'
+		if [[ $? == 0 ]]; then echo -e "[\033[0;32m OK \033[0m]"; else echo -e "[\033[0;31mFAIL\033[0m]"; fi
+
+		sleep 45
+
+		echo -n "Pushing ssh keys                               "
+		cat ~/.ssh/id_rsa.pub | ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- 'ID_RSA_PUB="$(cat -)"; ( mkdir ~/.ssh; chmod 700 ~/.ssh; touch ~/.ssh/authorized_keys; chmod 600  ~/.ssh/authorized_keys ) &>/dev/null; cat ~/.ssh/authorized_keys | grep "$ID_RSA_PUB" || echo "$ID_RSA_PUB" >> ~/.ssh/authorized_keys; cd ~; sudo tar -cf /var/lib/boot2docker/userdata.tar .ssh'
+		if [[ $? == 0 ]]; then echo -e "[\033[0;32m OK \033[0m]"; else echo -e "[\033[0;31mFAIL\033[0m]"; fi
+
+		echo -n "Installing cifs module                         "
+		ssh $SSH_OPTIONS $SSH_DOCKER_HOST 'sudo curl -L -q -o /var/lib/boot2docker/cifs-utils.tcz http://distro.ibiblio.org/tinycorelinux/5.x/x86/tcz/cifs-utils.tcz'
+		if [[ $? == 0 ]]; then echo -e "[\033[0;32m OK \033[0m]"; else echo -e "[\033[0;31mFAIL\033[0m]"; fi
+
+		echo -n "Installing boot script                         "
+		echo "$BOOT2DOCKER_INIT_SCRIPT" | ssh $SSH_OPTIONS $SSH_DOCKER_HOST 'cat - | sudo tee /var/lib/boot2docker/bootlocal.sh; sudo chmod 755 /var/lib/boot2docker/bootlocal.sh'
+		if [[ $? == 0 ]]; then echo -e "[\033[0;32m OK \033[0m]"; else echo -e "[\033[0;31mFAIL\033[0m]"; fi
+	;;
+	clean)
+		echo "Cleaning ALL up docker images"
+		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- 'docker rm $(docker ps -a | grep Exited | awk "{ print $1 }")'
+		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- 'docker rmi $(docker images -aq)'
+	;;
+	vmops)
+		VM_CMD=$2
+		shift
+		shift
+		"$(cygpath -u "$VMRUN_PATH")" -T ws $VM_CMD "$(cygpath -w "$VMPATH")" "$@"
+	;;
+	ip)
+		"$SCRIPT" vmops getGuestIPAddress -wait
+	;;
+	up)
+		"$SCRIPT" vmops start nogui
+	;;
+	down)
+		"$SCRIPT" vmops stop hard
+	;;
+	download)
+GET_LATEST_BOOT2DOCKER_TAG=$(
+cat << EOF
+require("https").get({
+	host: "api.github.com",
+	path: "/repos/boot2docker/boot2docker/releases",
+	headers: {"user-agent": "boot2docker-latest"}
+}, function(response) {
+	var body = "";
+	response.on("data", function(d) { body += d; });
+	response.on("end", function() {
+		try {
+			console.log(JSON.parse(body).reduce(function(p, c) { return (!(/^v\d+\.\d+\.\d+/).test(c.name) || p > c.name) ? p : c.name; }, "v0.0.0"));
+		} catch (e) {
+			console.error(e.message);
+		}
+	});
+});
+EOF
+)
+		ISO_PATH="$(dirname "$(cygpath "$VMPATH")")/boot2docker.iso"
+		LATEST_BOOT2DOCKER_TAG="$(node -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
+		if [[ -n "$LATEST_BOOT2DOCKER_TAG" ]] && [[ "$LATEST_BOOT2DOCKER_TAG" != "v0.0.0" ]]; then
+			echo "Downloading $LATEST_BOOT2DOCKER_TAG..."
+			curl -L --progress-bar "https://github.com/boot2docker/boot2docker/releases/download/${LATEST_BOOT2DOCKER_TAG}/boot2docker.iso" > "$ISO_PATH.new"
+			if [[ $? == 0 ]]; then
+				rm -f "$ISO_PATH"
+				mv "$ISO_PATH.new" "$ISO_PATH"
+				echo "Downloaded $LATEST_BOOT2DOCKER_TAG!"
+			else
+				echo "Failed to download!"
+				exit 1
+			fi
+		else
+			exit 1
+		fi
+	;;
+	*)
+		ssh $SSH_OPTIONS $SSH_DOCKER_HOST docker "$@"
+	;;
+esac
