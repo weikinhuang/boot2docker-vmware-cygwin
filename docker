@@ -9,6 +9,7 @@ SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
 SSH_DOCKER_HOST="docker@${BOOT2DOCKER_HOST}"
 VMRUN_PATH='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
 VMPATH='D:\Documents and Settings\My Documents\Virtual Machines\boot2docker\boot2docker.vmx'
+VMDIR="$(dirname "$(cygpath "$VMPATH")")"
 
 case "$1" in
 	ssh)
@@ -30,6 +31,14 @@ case "$1" in
 	put)
 		scp -r $SSH_OPTIONS "${2}" $SSH_DOCKER_HOST:"${3-~/}"
 	;;
+	createvm)
+		mkdir -p "$VMDIR"
+		curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmxf" > "$VMDIR/boot2docker.vmxf"
+		curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmx" > "$VMDIR/boot2docker.vmx"
+		curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmsd" > "$VMDIR/boot2docker.vmsd"
+		curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.tar.gz" | tar -zxO > "$VMDIR/boot2docker.vmdk"
+		"$SCRIPT" download
+	;;
 	init)
 BOOT2DOCKER_INIT_SCRIPT=$(
 cat << EOF
@@ -44,7 +53,7 @@ echo nameserver 8.8.4.4 >> /etc/resolv.conf
 
 EOF
 )
-		
+
 		# http://odewahn.github.io/docker-jumpstart/boot2docker.html
 		# http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
 
@@ -113,15 +122,15 @@ require("https").get({
 });
 EOF
 )
-		ISO_PATH="$(dirname "$(cygpath "$VMPATH")")/boot2docker.iso"
+		ISO_PATH="$VMDIR/boot2docker.iso"
 		LATEST_BOOT2DOCKER_TAG="$(node -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
 		if [[ -n "$LATEST_BOOT2DOCKER_TAG" ]] && [[ "$LATEST_BOOT2DOCKER_TAG" != "v0.0.0" ]]; then
-			echo "Downloading $LATEST_BOOT2DOCKER_TAG..."
+			echo "Downloading boot2docker $LATEST_BOOT2DOCKER_TAG..."
 			curl -L --progress-bar "https://github.com/boot2docker/boot2docker/releases/download/${LATEST_BOOT2DOCKER_TAG}/boot2docker.iso" > "$ISO_PATH.new"
 			if [[ $? == 0 ]]; then
-				rm -f "$ISO_PATH"
+				rm -f "$ISO_PATH" || true
 				mv "$ISO_PATH.new" "$ISO_PATH"
-				echo "Downloaded $LATEST_BOOT2DOCKER_TAG!"
+				echo "Downloaded boot2docker $LATEST_BOOT2DOCKER_TAG!"
 			else
 				echo "Failed to download!"
 				exit 1
