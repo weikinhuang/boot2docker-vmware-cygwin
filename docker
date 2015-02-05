@@ -10,6 +10,7 @@ SSH_DOCKER_HOST="docker@${BOOT2DOCKER_HOST}"
 VMRUN_PATH='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
 VMPATH='D:\Documents and Settings\My Documents\Virtual Machines\boot2docker\boot2docker.vmx'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
+FORWARDS_TMP_FILE=/tmp/docker-ssh-forward-pids
 
 case "$1" in
 	ssh)
@@ -25,7 +26,17 @@ case "$1" in
 	;;
 	forward)
 		ssh -N -L $2:$BOOT2DOCKER_HOST:$2 $SSH_OPTIONS $SSH_DOCKER_HOST >/dev/null 2>&1 &
-		echo $!
+		SSHPID=$!
+		if [[ $? == 0 ]]; then
+			echo $SSHPID >> $FORWARDS_TMP_FILE
+			echo "Forwarding port $2 with pid $SSHPID"
+		else
+			echo "Failed to forward port $2"
+		fi
+	;;
+	killforwards)
+        cat $FORWARDS_TMP_FILE | xargs -I{} sh -c 'if /usr/bin/ps -p "{}" | grep -v STIME | grep /usr/bin/ssh &>/dev/null; then kill {}; fi'
+        echo > $FORWARDS_TMP_FILE
 	;;
 	get)
 		scp -r $SSH_OPTIONS $SSH_DOCKER_HOST:"$2" "${3-.}"
@@ -48,6 +59,7 @@ case "$1" in
 		"$SCRIPT" download
 	;;
 	destroyvm)
+	    "$SCRIPT" down
 		rm -rf "$VMDIR"
 	;;
 	init)
@@ -173,9 +185,11 @@ DOCKER_INIT
 		"$SCRIPT" vmops start nogui
 	;;
 	down)
+	    "$SCRIPT" killforwards
 		"$SCRIPT" vmops stop hard
 	;;
 	reboot)
+	    "$SCRIPT" killforwards
 	    "$SCRIPT" ssh sudo reboot
 	;;
 	download)
@@ -216,6 +230,7 @@ EOF
 		fi
 	;;
 	*)
+	    # default run docker command on remote host
 		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- docker "$@"
 	;;
 esac
