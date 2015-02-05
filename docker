@@ -92,7 +92,7 @@ function docker-vmup () {
 
 function docker-vmdown () {
     docker-kill-forwards
-    docker-vmrun vmops stop hard
+    docker-vmrun stop hard
 }
 
 function docker-reboot () {
