@@ -18,7 +18,9 @@ case "$1" in
 	;;
 	cifs)
 		# http://blog.tutum.co/2014/11/05/how-to-use-docker-on-windows/
-		read -s -p "Enter CIFS share password: " CIFS_PASSWORD
+		echo -ne "\033[0;32mEnter CIFS share password: \033[0m"
+		read -s -p "" CIFS_PASSWORD
+		echo
 		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- "sudo mount -tcifs '-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777' '//${BOOT2DOCKER_NAT_HOST}/$2' /mnt/datashare"
 	;;
 	forward)
@@ -29,7 +31,13 @@ case "$1" in
 		scp -r $SSH_OPTIONS $SSH_DOCKER_HOST:"$2" "${3-.}"
 	;;
 	put)
-		scp -r $SSH_OPTIONS "${2}" $SSH_DOCKER_HOST:"${3-~/}"
+		scp -r $SSH_OPTIONS "${2}" $SSH_DOCKER_HOST:"${3-/home/docker/}"
+	;;
+	initvm)
+	    "$SCRIPT" createvm
+	    "$SCRIPT" up
+	    sleep 120
+	    "$SCRIPT" init
 	;;
 	createvm)
 		mkdir -p "$VMDIR"
@@ -39,48 +47,65 @@ case "$1" in
 		curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.tar.gz" | tar -zxO > "$VMDIR/boot2docker.vmdk"
 		"$SCRIPT" download
 	;;
+	destroyvm)
+		rm -rf "$VMDIR"
+	;;
 	init)
-BOOT2DOCKER_INIT_SCRIPT=$(
-cat << EOF
-#!/bin/sh
-
-mkdir /mnt/datashare &>/dev/null || true
-tce-load -i /var/lib/boot2docker/cifs-utils.tcz
-
-echo search localdomain > /etc/resolv.conf
-echo nameserver 8.8.8.8 >> /etc/resolv.conf
-echo nameserver 8.8.4.4 >> /etc/resolv.conf
-
-EOF
-)
-
 		# http://odewahn.github.io/docker-jumpstart/boot2docker.html
 		# http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
 
 		echo "Default password is 'tcuser'"
 		echo
-		echo -n "Setting up persistent storage                  " 
-		cat ~/.ssh/id_rsa.pub | ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- 'ID_RSA_PUB="$(cat -)"; ( mkdir ~/.ssh; chmod 700 ~/.ssh; touch ~/.ssh/authorized_keys; chmod 600  ~/.ssh/authorized_keys ) &>/dev/null; cat ~/.ssh/authorized_keys | grep "$ID_RSA_PUB" || echo "$ID_RSA_PUB" >> ~/.ssh/authorized_keys'
-		ssh $SSH_OPTIONS $SSH_DOCKER_HOST 'if ! blkid -c /dev/null | grep boot2docker-data &>/dev/null; then echo -e "n\np\n1\n\n\nw\n" | sudo fdisk /dev/sda; sudo mkfs.ext4 -L boot2docker-data /dev/sda1; fi'
-		if [[ $? == 0 ]]; then echo -e "[\033[0;32m OK \033[0m]"; else echo -e "[\033[0;31mFAIL\033[0m]"; fi
 
-		echo -n "Rebooting                                       "
-		ssh $SSH_OPTIONS $SSH_DOCKER_HOST 'sudo reboot'
-		if [[ $? == 0 ]]; then echo -e "[\033[0;32m OK \033[0m]"; else echo -e "[\033[0;31mFAIL\033[0m]"; fi
+        ID_RSA_PUB="$(cat ~/.ssh/id_rsa.pub)"
+ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- << DOCKER_INIT
 
-		sleep 45
+if blkid -c /dev/null | grep boot2docker-data &>/dev/null; then
+    exit 0
+fi
 
-		echo -n "Pushing ssh keys                               "
-		cat ~/.ssh/id_rsa.pub | ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- 'ID_RSA_PUB="$(cat -)"; ( mkdir ~/.ssh; chmod 700 ~/.ssh; touch ~/.ssh/authorized_keys; chmod 600  ~/.ssh/authorized_keys ) &>/dev/null; cat ~/.ssh/authorized_keys | grep "$ID_RSA_PUB" || echo "$ID_RSA_PUB" >> ~/.ssh/authorized_keys; cd ~; sudo tar -cf /var/lib/boot2docker/userdata.tar .ssh'
-		if [[ $? == 0 ]]; then echo -e "[\033[0;32m OK \033[0m]"; else echo -e "[\033[0;31mFAIL\033[0m]"; fi
+TCL_REPO_BASE=http://tinycorelinux.net/5.x/x86
 
-		echo -n "Installing cifs module                         "
-		ssh $SSH_OPTIONS $SSH_DOCKER_HOST 'sudo curl -L -q -o /var/lib/boot2docker/cifs-utils.tcz http://distro.ibiblio.org/tinycorelinux/5.x/x86/tcz/cifs-utils.tcz'
-		if [[ $? == 0 ]]; then echo -e "[\033[0;32m OK \033[0m]"; else echo -e "[\033[0;31mFAIL\033[0m]"; fi
+echo -e "\033[0;32mFormatting /dev/sda\033[0m"
+echo -e "n\np\n1\n\n\nw\n" | sudo fdisk /dev/sda
+sudo mkfs.ext4 -L boot2docker-data /dev/sda1
+sudo mkdir /mnt/sda1
+sudo mount -t ext4 /dev/sda1 /mnt/sda1
+sudo mkdir -p /mnt/sda1/var/lib/boot2docker
+echo -e "\033[0;32mPushing ssh keys\033[0m"
+mkdir /home/docker/.ssh
+chmod 700 /home/docker/.ssh
+touch /home/docker/.ssh/authorized_keys
+chmod 600 /home/docker/.ssh/authorized_keys
+cat /home/docker/.ssh/authorized_keys | grep "$ID_RSA_PUB" || echo "$ID_RSA_PUB" >> /home/docker/.ssh/authorized_keys
+WORKING_DIR="\$(pwd)"
+cd /home/docker
+sudo tar -cf /mnt/sda1/var/lib/boot2docker/userdata.tar .ssh
+cd "\$WORKING_DIR"
+echo -e "\033[0;32mDownloading additional modules\033[0m"
+sudo mkdir -p /mnt/sda1/var/lib/boot2docker/tcz
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/tcz/cifs-utils.tcz \$TCL_REPO_BASE/x86/tcz/cifs-utils.tcz
 
-		echo -n "Installing boot script                         "
-		echo "$BOOT2DOCKER_INIT_SCRIPT" | ssh $SSH_OPTIONS $SSH_DOCKER_HOST 'cat - | sudo tee /var/lib/boot2docker/bootlocal.sh; sudo chmod 755 /var/lib/boot2docker/bootlocal.sh'
-		if [[ $? == 0 ]]; then echo -e "[\033[0;32m OK \033[0m]"; else echo -e "[\033[0;31mFAIL\033[0m]"; fi
+echo -e "\033[0;32mInstalling local boot script\033[0m"
+sudo tee /mnt/sda1/var/lib/boot2docker/bootlocal.sh << BOOT2DOCKER_INIT_SCRIPT
+#!/bin/sh
+
+mkdir /mnt/datashare &>/dev/null || true
+tce-load -i /var/lib/boot2docker/tcz/*.tcz
+
+echo search localdomain > /etc/resolv.conf
+echo nameserver 8.8.8.8 >> /etc/resolv.conf
+echo nameserver 8.8.4.4 >> /etc/resolv.conf
+BOOT2DOCKER_INIT_SCRIPT
+
+sudo chmod 755 /mnt/sda1/var/lib/boot2docker/bootlocal.sh
+
+echo -e "\033[0;32mRebooting\033[0m"
+sudo reboot
+
+DOCKER_INIT
+        sleep 60
+        echo -e "\033[0;32mReady\033[0m"
 	;;
 	clean)
 		echo "Cleaning ALL up docker images"
@@ -103,7 +128,7 @@ EOF
 		"$SCRIPT" vmops stop hard
 	;;
 	download)
-GET_LATEST_BOOT2DOCKER_TAG=$(
+GET_LATEST_BOOT2DOCKER_TAG="$(
 cat << EOF
 require("https").get({
 	host: "api.github.com",
@@ -121,7 +146,7 @@ require("https").get({
 	});
 });
 EOF
-)
+)"
 		ISO_PATH="$VMDIR/boot2docker.iso"
 		LATEST_BOOT2DOCKER_TAG="$(node -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
 		if [[ -n "$LATEST_BOOT2DOCKER_TAG" ]] && [[ "$LATEST_BOOT2DOCKER_TAG" != "v0.0.0" ]]; then
