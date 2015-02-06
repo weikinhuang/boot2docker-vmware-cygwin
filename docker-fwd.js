@@ -7,11 +7,8 @@ function killActiveTunnel() {
     if (activeTunnel) {
         activeTunnel.kill("SIGINT");
         activeTunnel = null;
+        activePorts = [];
     }
-}
-function hasDiff(arr1, arr2) {
-    return arr1.filter(function(i) { return !(arr2.indexOf(i) > -1); }).length > 0 ||
-        arr2.filter(function(i) { return !(arr1.indexOf(i) > -1); }).length > 0;
 }
 function updatePorts() {
     child_process.exec("bash docker forwarded-ports", function(err, stdout, stderr) {
@@ -25,7 +22,7 @@ function updatePorts() {
         stdout.replace(/\d+\/\w+ -> \d+.\d+.\d+.\d+:(\d+)/g, function(m, p) {
             ports.push(+p);
         });
-        if (!hasDiff(activePorts, ports)) {
+        if (activePorts.sort().join(",") === ports.sort().join(",")) {
             return;
         }
         killActiveTunnel();
@@ -47,7 +44,31 @@ setTimeout(updatePorts, 5000);
 process.on("exit", killActiveTunnel);
 require("http")
     .createServer(function(request, response) {
-        setTimeout(updatePorts, 5000);
+        switch (request.url) {
+            case "/ports":
+                response.write(activePorts.join("\n"));
+                break;
+            case "/child":
+                if (activeTunnel) {
+                    response.write(activeTunnel.pid + "");
+                }
+                break;
+            case "/child/kill":
+                killActiveTunnel();
+                break;
+            case "/pid":
+                response.write(process.pid + "");
+                break;
+            case "/kill":
+                process.nextTick(function() {
+                    process.exit(0);
+                });
+                break;
+            case "/":
+            default:
+                setTimeout(updatePorts, 5000);
+                break;
+        }
         response.end("");
     })
     .listen(59145, "localhost");
