@@ -5,7 +5,7 @@ SCRIPT="$0"
 VMWARE_NET_HOST_PREFIX=${VMWARE_NET_HOST/%.1/}
 BOOT2DOCKER_NET_HOST_PREFIX=${VMWARE_NET_HOST_PREFIX-192.168.229}
 BOOT2DOCKER_NAT_HOST=${VMWARE_NET_HOST_PREFIX}.1
-BOOT2DOCKER_HOST=${BOOT2DOCKER_VM_IP-${BOOT2DOCKER_NET_HOST_PREFIX}.128}
+export BOOT2DOCKER_HOST=${BOOT2DOCKER_VM_IP-${BOOT2DOCKER_NET_HOST_PREFIX}.128}
 
 SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
 SSH_DOCKER_HOST="docker@${BOOT2DOCKER_HOST}"
@@ -29,6 +29,10 @@ function docker-mount-cifs () {
     docker-ssh "sudo mount -tcifs '-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777' '//${BOOT2DOCKER_NAT_HOST}/$LOCAL_FOLDER' '$REMOTE_FOLDER'"
 }
 
+function docker-port-forward-watch () {
+    node "./docker-fwd.js"
+}
+
 function docker-forward-port () {
     local FWD_PORT=$2
     if [[ -z $FWD_PORT ]]; then
@@ -49,8 +53,10 @@ function docker-forward-port () {
 }
 
 function docker-kill-forwards () {
-    cat $FORWARDS_TMP_FILE | xargs -I{} sh -c 'if /usr/bin/ps -p "{}" | grep -v STIME | grep /usr/bin/ssh &>/dev/null; then kill {}; fi'
-    echo > $FORWARDS_TMP_FILE
+    if [[ -e $FORWARDS_TMP_FILE ]]; then
+        cat $FORWARDS_TMP_FILE | xargs -I{} sh -c 'if /usr/bin/ps -p "{}" | grep -v STIME | grep /usr/bin/ssh &>/dev/null; then kill {}; fi'
+        echo > $FORWARDS_TMP_FILE
+    fi
 }
 
 function docker-get () {
@@ -246,6 +252,10 @@ DOCKER_INIT
     echo -e "\033[0;32mReady\033[0m"
 }
 
+# ======================================================================================================================
+# Start of commnds
+# ======================================================================================================================
+
 SHELL_DOCKER_ACTION="$1"
 shift
 case "$SHELL_DOCKER_ACTION" in
@@ -262,8 +272,15 @@ case "$SHELL_DOCKER_ACTION" in
             echo "Failed to forward port $2"
         fi
     ;;
+    forwardwatch)
+        docker-port-forward-watch
+        echo $!
+    ;;
     killforwards)
         docker-kill-forwards
+    ;;
+    forwarded-ports)
+        docker-ssh 'for x in $(docker ps -q); do docker port $x; done'
     ;;
     get)
         docker-get "$@"
