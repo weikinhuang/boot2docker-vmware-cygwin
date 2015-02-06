@@ -14,6 +14,7 @@ NODE_BIN="$(cygpath 'C:\Program Files\nodejs\node.exe')"
 VMPATH='D:\Documents and Settings\My Documents\Virtual Machines\boot2docker\boot2docker.vmx'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
 FORWARDS_TMP_FILE=/tmp/docker-ssh-forward.pid
+FORWARDS_SERVER_PORT=59145
 
 function docker-ssh () {
     ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- "$@"
@@ -30,17 +31,8 @@ function docker-mount-cifs () {
     docker-ssh "sudo mount -tcifs '-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777' '//${BOOT2DOCKER_NAT_HOST}/$LOCAL_FOLDER' '$REMOTE_FOLDER'"
 }
 
-function docker-start-port-forward-manager () {
-    docker-kill-forwards
-    "$NODE_BIN" "./docker-fwd.js" &
-    local FWD_PID=$!
-    local FWD_EXIT=$?
-    echo $FWD_PID > $FORWARDS_TMP_FILE
-    return $FWD_EXIT
-}
-
 function docker-refresh-port-forwards () {
-    curl -q localhost:59145 &>/dev/null
+    curl -q localhost:$FORWARDS_SERVER_PORT &>/dev/null
 }
 
 function docker-kill-forwards () {
@@ -101,6 +93,70 @@ function docker-vmdown () {
 function docker-reboot () {
     docker-kill-forwards
     docker-ssh sudo reboot
+}
+
+function docker-start-port-forward-manager () {
+FWD_SERVER_JS="$(
+cat << EOF
+var child_process = require("child_process"),
+    activeTunnel = null,
+    activePorts = [];
+function killActiveTunnel() {
+    if (activeTunnel) {
+        activeTunnel.kill("SIGINT");
+        activeTunnel = null;
+    }
+}
+function hasDiff(arr1, arr2) {
+    return arr1.filter(function(i) { return !(arr2.indexOf(i) > -1); }).length > 0 ||
+        arr2.filter(function(i) { return !(arr1.indexOf(i) > -1); }).length > 0;
+}
+function updatePorts() {
+    child_process.exec("bash docker forwarded-ports", function(err, stdout, stderr) {
+        if (stderr) {
+            process.stderr.write(stderr);
+        }
+        if (err) {
+            return;
+        }
+        var ports = [];
+        stdout.replace(/\d+\/\w+ -> \d+.\d+.\d+.\d+:(\d+)/g, function(m, p) {
+            ports.push(+p);
+        });
+        if (!hasDiff(activePorts, ports)) {
+            return;
+        }
+        killActiveTunnel();
+        var args = [
+            "-N",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "ConnectTimeout=2"
+        ];
+        ports.forEach(function(p) {
+            args.push("-L", p + ":" + process.env.BOOT2DOCKER_HOST + ":" + p);
+        });
+        args.push("docker@" + process.env.BOOT2DOCKER_HOST);
+        activeTunnel = child_process.spawn("ssh", args);
+        activePorts = ports;
+    });
+}
+setTimeout(updatePorts, 5000);
+process.on("exit", killActiveTunnel);
+require("http")
+    .createServer(function(request, response) {
+        setTimeout(updatePorts, 5000);
+        response.end("");
+    })
+    .listen($FORWARDS_SERVER_PORT, "localhost");
+EOF
+)"
+    docker-kill-forwards
+    "$NODE_BIN" -e "$FWD_SERVER_JS" &
+    local FWD_PID=$!
+    local FWD_EXIT=$?
+    echo $FWD_PID > $FORWARDS_TMP_FILE
+    return $FWD_EXIT
 }
 
 function docker-download-iso () {
@@ -268,6 +324,9 @@ case "$SHELL_DOCKER_ACTION" in
     ;;
     refresh-forward)
         docker-refresh-port-forwards
+    ;;
+    forward-pid)
+        cat $FORWARDS_TMP_FILE 2>/dev/null
     ;;
     forwarded-ports)
         docker-ssh 'for x in $(docker ps -q); do docker port $x; done'
