@@ -13,7 +13,7 @@ VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
 NODE_BIN="$(cygpath 'C:\Program Files\nodejs\node.exe')"
 VMPATH='D:\Documents and Settings\My Documents\Virtual Machines\boot2docker\boot2docker.vmx'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
-FORWARDS_SERVER_PORT=59145
+export FORWARDS_SERVER_PORT=59145
 
 function docker-ssh () {
     ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- "$@"
@@ -86,17 +86,15 @@ function docker-vmup () {
 }
 
 function docker-vmdown () {
-    docker-kill-forwards
     docker-vmrun stop hard
 }
 
 function docker-reboot () {
-    docker-kill-forwards
     docker-ssh sudo reboot
 }
 
 function docker-start-port-forward-manager () {
-FWD_SERVER_JS="$(
+FWD_SERVER_JS=$(
 cat << EOF
 var child_process = require("child_process"),
     activeTunnel = null,
@@ -169,10 +167,10 @@ require("http")
         }
         response.end("");
     })
-    .listen($FORWARDS_SERVER_PORT, "localhost");
+    .listen(process.env.FORWARDS_SERVER_PORT, "localhost");
 EOF
-)"
-    docker-kill-forwards
+)
+    docker-forward-kill
     "$NODE_BIN" -e "$FWD_SERVER_JS" &
 }
 
@@ -387,15 +385,24 @@ case "$SHELL_DOCKER_ACTION" in
     ;;
     up)
         docker-vmup
+        docker-start-port-forward-manager
     ;;
     down)
+        docker-forward-kill
         docker-vmdown
     ;;
     reboot)
+        docker-forward-kill
         docker-reboot
+        sleep 20
+        docker-start-port-forward-manager
     ;;
     download)
         docker-download-iso
+    ;;
+    run|start|stop|kill)
+        docker-refresh-port-forwards
+        docker-ssh docker "$SHELL_DOCKER_ACTION" "$@"
     ;;
     *)
         # default run docker command on remote host
