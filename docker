@@ -2,9 +2,9 @@
 
 SCRIPT="$0"
 
-BOOT2DOCKER_NAT_PREFIX=192.168.126
+BOOT2DOCKER_NAT_PREFIX=192.168.229
 BOOT2DOCKER_NAT_HOST=${BOOT2DOCKER_NAT_PREFIX}.1
-BOOT2DOCKER_HOST=${BOOT2DOCKER_NAT_PREFIX}.130
+BOOT2DOCKER_HOST=${BOOT2DOCKER_NAT_PREFIX}.128
 SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
 SSH_DOCKER_HOST="docker@${BOOT2DOCKER_HOST}"
 VMRUN_PATH='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
@@ -104,19 +104,19 @@ function docker-download-iso () {
 GET_LATEST_BOOT2DOCKER_TAG="$(
 cat << EOF
 require("https").get({
-	host: "api.github.com",
-	path: "/repos/boot2docker/boot2docker/releases",
-	headers: {"user-agent": "boot2docker-latest"}
+    host: "api.github.com",
+    path: "/repos/boot2docker/boot2docker/releases",
+    headers: {"user-agent": "boot2docker-latest"}
 }, function(response) {
-	var body = "";
-	response.on("data", function(d) { body += d; });
-	response.on("end", function() {
-		try {
-			console.log(JSON.parse(body).reduce(function(p, c) { return (!(/^v\d+\.\d+\.\d+/).test(c.name) || p > c.name) ? p : c.name; }, "v0.0.0"));
-		} catch (e) {
-			console.error(e.message);
-		}
-	});
+    var body = "";
+    response.on("data", function(d) { body += d; });
+    response.on("end", function() {
+        try {
+            console.log(JSON.parse(body).reduce(function(p, c) { return (!(/^v\d+\.\d+\.\d+/).test(c.name) || p > c.name) ? p : c.name; }, "v0.0.0"));
+        } catch (e) {
+            console.error(e.message);
+        }
+    });
 });
 EOF
 )"
@@ -138,52 +138,14 @@ EOF
     fi
 }
 
-SHELL_DOCKER_ACTION="$1"
-shift
-case "$SHELL_DOCKER_ACTION" in
-    ssh)
-        docker-ssh
-    ;;
-    cifs)
-        docker-mount-cifs "$@"
-    ;;
-    forward)
-        if docker-forward-port "$@"; then
-            echo "Forwarding port $2 with pid $SSHPID"
-        else
-            echo "Failed to forward port $2"
-        fi
-    ;;
-    killforwards)
-        docker-kill-forwards
-    ;;
-    get)
-        docker-get "$@"
-    ;;
-    put)
-        docker-put "$@"
-    ;;
-    initvm)
-        "$SCRIPT" createvm
-        "$SCRIPT" up
-        sleep 120
-        "$SCRIPT" init
-    ;;
-    createvm)
-        docker-create-vm
-        docker-download-iso
-    ;;
-    destroyvm)
-        docker-destroy-vm
-    ;;
-	init)
-		# http://odewahn.github.io/docker-jumpstart/boot2docker.html
-		# http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
+function docker-vm-init () {
+    # http://odewahn.github.io/docker-jumpstart/boot2docker.html
+    # http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
 
-		echo "Default password is 'tcuser'"
-		echo
+    echo "Default password is 'tcuser'"
+    echo
 
-        ID_RSA_PUB="$(cat ~/.ssh/id_rsa.pub)"
+    local ID_RSA_PUB="$(cat ~/.ssh/id_rsa.pub)"
 ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- << DOCKER_INIT
 
 if blkid -c /dev/null | grep boot2docker-data &>/dev/null; then
@@ -278,34 +240,77 @@ echo -e "\033[0;32mRebooting\033[0m"
 sudo reboot
 
 DOCKER_INIT
-		sleep 60
-		echo -e "\033[0;32mReady\033[0m"
-	;;
-	clean)
-		echo "Cleaning ALL up docker images"
-		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- 'docker rm $(docker ps -a | grep Exited | awk "{ print $1 }")'
-		ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- 'docker rmi $(docker images -aq)'
-	;;
+    sleep 60
+    echo -e "\033[0;32mReady\033[0m"
+}
+
+SHELL_DOCKER_ACTION="$1"
+shift
+case "$SHELL_DOCKER_ACTION" in
+    ssh)
+        docker-ssh "$@"
+    ;;
+    cifs)
+        docker-mount-cifs "$@"
+    ;;
+    forward)
+        if docker-forward-port "$@"; then
+            echo "Forwarding port $2 with pid $SSHPID"
+        else
+            echo "Failed to forward port $2"
+        fi
+    ;;
+    killforwards)
+        docker-kill-forwards
+    ;;
+    get)
+        docker-get "$@"
+    ;;
+    put)
+        docker-put "$@"
+    ;;
+    initvm)
+        docker-create-vm
+        docker-download-iso
+        docker-vm-up
+        sleep 120
+        docker-vm-init
+    ;;
+    createvm)
+        docker-create-vm
+        docker-download-iso
+    ;;
+    destroyvm)
+        docker-destroy-vm
+    ;;
+    init)
+        docker-vm-init
+    ;;
+    clean)
+        echo "Cleaning ALL up docker images"
+        docker-ssh docker rm '$(docker ps -a | grep Exited | awk "{ print $1 }")'
+        docker-ssh docker rmi '$(docker images -aq)'
+    ;;
     vmrun)
         docker-vmrun "$@"
-	;;
-	ip)
-		docker-ip
-	;;
-	up)
-		docker-vmup
-	;;
-	down)
-	    docker-vmdown
-	;;
-	reboot)
-	    docker-reboot
-	;;
-	download)
+    ;;
+    ip)
+        docker-ip
+    ;;
+    up)
+        docker-vmup
+    ;;
+    down)
+        docker-vmdown
+    ;;
+    reboot)
+        docker-reboot
+    ;;
+    download)
         docker-download-iso
-	;;
-	*)
-	    # default run docker command on remote host
-	    docker-ssh docker "$@"
-	;;
+    ;;
+    *)
+        # default run docker command on remote host
+        docker-ssh docker "$SHELL_DOCKER_ACTION" "$@"
+    ;;
 esac
