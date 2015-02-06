@@ -7,12 +7,13 @@ BOOT2DOCKER_NET_HOST_PREFIX=${VMWARE_NET_HOST_PREFIX-192.168.229}
 BOOT2DOCKER_NAT_HOST=${VMWARE_NET_HOST_PREFIX}.1
 export BOOT2DOCKER_HOST=${BOOT2DOCKER_VM_IP-${BOOT2DOCKER_NET_HOST_PREFIX}.128}
 
-SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o ConnectTimeout=5"
 SSH_DOCKER_HOST="docker@${BOOT2DOCKER_HOST}"
-VMRUN_PATH='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
+VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
+NODE_BIN="$(cygpath 'C:\Program Files\nodejs\node.exe')"
 VMPATH='D:\Documents and Settings\My Documents\Virtual Machines\boot2docker\boot2docker.vmx'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
-FORWARDS_TMP_FILE=/tmp/docker-ssh-forward-pids
+FORWARDS_TMP_FILE=/tmp/docker-ssh-forward.pid
 
 function docker-ssh () {
     ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- "$@"
@@ -29,33 +30,27 @@ function docker-mount-cifs () {
     docker-ssh "sudo mount -tcifs '-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777' '//${BOOT2DOCKER_NAT_HOST}/$LOCAL_FOLDER' '$REMOTE_FOLDER'"
 }
 
-function docker-port-forward-watch () {
-    node "./docker-fwd.js"
+function docker-start-port-forward-manager () {
+    docker-kill-forwards
+    "$NODE_BIN" "./docker-fwd.js" &
+    local FWD_PID=$!
+    local FWD_EXIT=$?
+    echo $FWD_PID > $FORWARDS_TMP_FILE
+    return $FWD_EXIT
 }
 
-function docker-forward-port () {
-    local FWD_PORT=$2
-    if [[ -z $FWD_PORT ]]; then
-        echo "Port required!"
-        return 1
-    fi
-
-    ssh -N -L $FWD_PORT:$BOOT2DOCKER_HOST:$FWD_PORT $SSH_OPTIONS $SSH_DOCKER_HOST >/dev/null 2>&1 &
-    local SSHPID=$!
-    local SSH_EXIT=$?
-    if [[ $SSH_EXIT == 0 ]]; then
-        echo $SSHPID >> $FORWARDS_TMP_FILE
-        echo "Forwarding port $2 with pid $SSHPID"
-    else
-        echo "Failed to forward port $2"
-    fi
-    return $SSH_EXIT
+function docker-refresh-port-forwards () {
+    curl -q localhost:59145 &>/dev/null
 }
 
 function docker-kill-forwards () {
+    local FWD_PID
     if [[ -e $FORWARDS_TMP_FILE ]]; then
-        cat $FORWARDS_TMP_FILE | xargs -I{} sh -c 'if /usr/bin/ps -p "{}" | grep -v STIME | grep /usr/bin/ssh &>/dev/null; then kill {}; fi'
-        echo > $FORWARDS_TMP_FILE
+        FWD_PID=$(cat $FORWARDS_TMP_FILE 2>/dev/null)
+        if [[ -n FWD_PID ]] && /usr/bin/ps -p $FWD_PID | grep -v STIME | grep nodejs/node &>/dev/null; then
+            kill $FWD_PID &>/dev/null;
+        fi
+        rm -f $FORWARDS_TMP_FILE
     fi
 }
 
@@ -87,7 +82,7 @@ function docker-destroy-vm () {
 function docker-vmrun () {
     local VM_CMD=$1
     shift
-    "$(cygpath -u "$VMRUN_PATH")" -T ws $VM_CMD "$(cygpath -w "$VMPATH")" "$@"
+    "$(cygpath -u "$VMRUN_BIN")" -T ws $VM_CMD "$(cygpath -w "$VMPATH")" "$@"
 }
 
 function docker-ip () {
@@ -129,7 +124,7 @@ require("https").get({
 EOF
 )"
     ISO_PATH="$VMDIR/boot2docker.iso"
-    LATEST_BOOT2DOCKER_TAG="$(node -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
+    LATEST_BOOT2DOCKER_TAG="$("$NODE_BIN" -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
     if [[ -n "$LATEST_BOOT2DOCKER_TAG" ]] && [[ "$LATEST_BOOT2DOCKER_TAG" != "v0.0.0" ]]; then
         echo "Downloading boot2docker $LATEST_BOOT2DOCKER_TAG..."
         curl -L --progress-bar "https://github.com/boot2docker/boot2docker/releases/download/${LATEST_BOOT2DOCKER_TAG}/boot2docker.iso" > "$ISO_PATH.new"
@@ -266,18 +261,13 @@ case "$SHELL_DOCKER_ACTION" in
         docker-mount-cifs "$@"
     ;;
     forward)
-        if docker-forward-port "$@"; then
-            echo "Forwarding port $2 with pid $SSHPID"
-        else
-            echo "Failed to forward port $2"
-        fi
+        docker-start-port-forward-manager
     ;;
-    forwardwatch)
-        docker-port-forward-watch
-        echo $!
-    ;;
-    killforwards)
+    kill-forward)
         docker-kill-forwards
+    ;;
+    refresh-forward)
+        docker-refresh-port-forwards
     ;;
     forwarded-ports)
         docker-ssh 'for x in $(docker ps -q); do docker port $x; done'

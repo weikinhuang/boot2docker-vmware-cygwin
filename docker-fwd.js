@@ -2,10 +2,7 @@
 
 var child_process = require("child_process"),
 	activeTunnel = null,
-	activePorts = [],
-	portmapRegex = /^\d+\/\w+ -> \d+.\d+.\d+.\d+:(\d+)$/;
-
-process.on("exit", killActiveTunnel);
+	activePorts = [];
 
 function killActiveTunnel() {
 	if (activeTunnel) {
@@ -24,20 +21,13 @@ function updatePorts() {
 		if (stderr) {
 			process.stderr.write(stderr);
 		}
-		if (err || !stdout.trim()) {
+		if (err) {
 			return;
 		}
-		var ports = stdout.split("\n")
-			.reduce(function(p, c) {
-				c = c.trim();
-				if (!c || !portmapRegex.test(c)) {
-					return p;
-				}
-				p.push(parseInt(portmapRegex.exec(c)[1], 10));
-				return p;
-			}, [])
-			.sort();
-
+		var ports = [];
+		stdout.replace(/\d+\/\w+ -> \d+.\d+.\d+.\d+:(\d+)/g, function(m, p) {
+			ports.push(+p);
+		});
 		if (!hasDiff(activePorts, ports)) {
 			return;
 		}
@@ -45,7 +35,8 @@ function updatePorts() {
 		var args = [
 			"-N",
 			"-o", "UserKnownHostsFile=/dev/null",
-			"-o", "StrictHostKeyChecking=no"
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "ConnectTimeout=2"
 		];
 		ports.forEach(function(p) {
 			args.push("-L", p + ":" + process.env.BOOT2DOCKER_HOST + ":" + p);
@@ -56,11 +47,9 @@ function updatePorts() {
 	});
 }
 
-updatePorts();
-
+setTimeout(updatePorts, 5000);
+process.on("exit", killActiveTunnel);
 require("http").createServer(function(request, response) {
-	response.writeHead(200, {"Content-Type": "text/plain"});
-	updatePorts();
-	response.write("");
-	response.end();
+	setTimeout(updatePorts, 5000);
+	response.end("");
 }).listen(59145, "localhost");
