@@ -2,68 +2,71 @@
 
 SCRIPT="$0"
 
-VMWARE_NET_HOST_PREFIX=${VMWARE_NET_HOST/%.1/}
-BOOT2DOCKER_NET_HOST_PREFIX=${VMWARE_NET_HOST_PREFIX-192.168.229}
-BOOT2DOCKER_NAT_HOST=${VMWARE_NET_HOST_PREFIX}.1
-export BOOT2DOCKER_HOST=${BOOT2DOCKER_VM_IP-${BOOT2DOCKER_NET_HOST_PREFIX}.128}
-
 SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o ConnectTimeout=5"
-SSH_DOCKER_HOST="docker@${BOOT2DOCKER_HOST}"
 VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
 NODE_BIN="$(cygpath 'C:\Program Files\nodejs\node.exe')"
 VMPATH='D:\Documents and Settings\My Documents\Virtual Machines\boot2docker\boot2docker.vmx'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
 export FORWARDS_SERVER_PORT=59145
 
+function docker-host () {
+    if [[ -n "${DOCKER_HOST}" ]]; then
+        echo "${DOCKER_HOST}"
+        return 0
+    fi
+    echo $(docker-ip)
+}
+
 function docker-ssh () {
-    ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- "$@"
+    ssh ${SSH_OPTIONS} docker@$(docker-host) -- "$@"
 }
 
 function docker-mount-cifs () {
     local CIFS_PASSWORD
     local LOCAL_FOLDER="$1"
     local REMOTE_FOLDER="${2-/mnt/datashare}"
+    local NAT_HOST="$(docker-host | sed 's/\.[0-9]\+$//').1"
     # http://blog.tutum.co/2014/11/05/how-to-use-docker-on-windows/
     echo -ne "\033[0;32mEnter CIFS share password: \033[0m"
     read -s -p "" CIFS_PASSWORD
     echo
-    docker-ssh "sudo mount -tcifs '-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777' '//${BOOT2DOCKER_NAT_HOST}/$LOCAL_FOLDER' '$REMOTE_FOLDER'"
+    docker-ssh "sudo mount -tcifs '-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777' '//${NAT_HOST}/$LOCAL_FOLDER' '$REMOTE_FOLDER'"
 }
 
 function docker-refresh-port-forwards () {
-    curl -q -m 3 localhost:$FORWARDS_SERVER_PORT &>/dev/null
+    curl -q -m 3 localhost:${FORWARDS_SERVER_PORT} &>/dev/null
 }
 
 function docker-forward-kill () {
-    curl -q -m 3 localhost:$FORWARDS_SERVER_PORT/kill &>/dev/null
+    curl -q -m 3 localhost:${FORWARDS_SERVER_PORT}/kill &>/dev/null
 }
 
 function docker-forward-pid () {
-    curl -q -m 3 localhost:$FORWARDS_SERVER_PORT/pid 2>/dev/null
+    curl -q -m 3 localhost:${FORWARDS_SERVER_PORT}/pid 2>/dev/null
 }
 
 function docker-forward-ports () {
-    curl -q -m 3 localhost:$FORWARDS_SERVER_PORT/ports 2>/dev/null
+    curl -q -m 3 localhost:${FORWARDS_SERVER_PORT}/ports 2>/dev/null
 }
 
 function docker-get () {
     local TARGET="$1"
     local DEST="${2-.}"
-    scp -r $SSH_OPTIONS $SSH_DOCKER_HOST:"$TARGET" "$DEST"
+    scp -r ${SSH_OPTIONS} docker@$(docker-host):"$TARGET" "$DEST"
 }
 
 function docker-put () {
     local TARGET="$1"
     local DEST="${2-/home/docker/}"
-    scp -r $SSH_OPTIONS "$TARGET" $SSH_DOCKER_HOST:"${DEST}"
+    scp -r ${SSH_OPTIONS} "$TARGET" docker@$(docker-host):"${DEST}"
 }
 
 function docker-create-vm () {
-    mkdir -p "$VMDIR"
-    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmxf" > "$VMDIR/boot2docker.vmxf"
-    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmx" > "$VMDIR/boot2docker.vmx"
-    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmsd" > "$VMDIR/boot2docker.vmsd"
-    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.tar.gz" | tar -zxO > "$VMDIR/boot2docker.vmdk"
+    mkdir -p "${VMDIR}"
+    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmxf" > "${VMDIR}/boot2docker.vmxf"
+    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmx" > "${VMDIR}/boot2docker.vmx"
+    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmsd" > "${VMDIR}/boot2docker.vmsd"
+    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.tar.gz" | tar -zxO > "${VMDIR}/boot2docker.vmdk"
 }
 
 function docker-destroy-vm () {
@@ -74,7 +77,7 @@ function docker-destroy-vm () {
 function docker-vmrun () {
     local VM_CMD=$1
     shift
-    "$(cygpath -u "$VMRUN_BIN")" -T ws $VM_CMD "$(cygpath -w "$VMPATH")" "$@"
+    "$(cygpath -u "$VMRUN_BIN")" -T ws "${VM_CMD}" "$(cygpath -w "$VMPATH")" "$@" | tr -d '\r'
 }
 
 function docker-ip () {
@@ -129,9 +132,9 @@ function updatePorts() {
             "-o", "ConnectTimeout=2"
         ];
         ports.forEach(function(p) {
-            args.push("-L", p + ":" + process.env.BOOT2DOCKER_HOST + ":" + p);
+            args.push("-L", p + ":" + process.env.DOCKER_HOST + ":" + p);
         });
-        args.push("docker@" + process.env.BOOT2DOCKER_HOST);
+        args.push("docker@" + process.env.DOCKER_HOST);
         activeTunnel = child_process.spawn("ssh", args);
         activePorts = ports;
     });
@@ -171,7 +174,7 @@ require("http")
 EOF
 )
     docker-forward-kill
-    "$NODE_BIN" -e "$FWD_SERVER_JS" &
+    DOCKER_HOST="$(docker-host)" "$NODE_BIN" -e "$FWD_SERVER_JS" &
 }
 
 function docker-boot2docker-iso-url () {
@@ -208,7 +211,7 @@ EOF
 
 function docker-download-iso () {
     local ISO_URL="$(docker-boot2docker-iso-url)"
-    if [[ -z $ISO_URL ]]; then
+    if [[ -z "${ISO_URL}" ]]; then
         exit 1
     fi
 
@@ -233,7 +236,9 @@ function docker-vm-init () {
     echo
 
     local ID_RSA_PUB="$(cat ~/.ssh/id_rsa.pub)"
-ssh $SSH_OPTIONS $SSH_DOCKER_HOST -- << DOCKER_INIT
+
+docker-ssh << DOCKER_INIT
+#!/bin/sh
 
 if ! blkid -c /dev/null | grep boot2docker-data &>/dev/null; then
     echo -e "\033[0;32mFormatting /dev/sda\033[0m"
@@ -254,7 +259,7 @@ touch /home/docker/.ssh/authorized_keys
 sudo touch /mnt/sda1/var/lib/boot2docker/.ash_history
 sudo chown docker /mnt/sda1/var/lib/boot2docker/.ash_history
 chmod 600 /home/docker/.ssh/authorized_keys
-cat /home/docker/.ssh/authorized_keys | grep "$ID_RSA_PUB" || echo "$ID_RSA_PUB" >> /home/docker/.ssh/authorized_keys
+cat /home/docker/.ssh/authorized_keys | grep "${ID_RSA_PUB}" || echo "${ID_RSA_PUB}" >> /home/docker/.ssh/authorized_keys
 cd /home/docker
 ln -sf /var/lib/boot2docker/.ash_history .ash_history
 sudo tar -cf /mnt/sda1/var/lib/boot2docker/userdata.tar .ssh .ash_history
