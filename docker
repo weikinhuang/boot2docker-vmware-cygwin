@@ -18,11 +18,11 @@ function docker-host () {
 }
 
 function docker-ssh () {
-    ssh ${SSH_OPTIONS} docker@$(docker-host) -- "$@"
+    ssh ${SSH_OPTIONS} docker@$(docker-host) -- $(printf '%q ' "$@")
 }
 
 function docker-ssh-with-tty () {
-    ssh ${SSH_OPTIONS} -t docker@$(docker-host) -- "$@"
+    ssh ${SSH_OPTIONS} -t docker@$(docker-host) -- $(printf '%q ' "$@")
 }
 
 function docker-mount-cifs () {
@@ -386,6 +386,9 @@ case "$SHELL_DOCKER_ACTION" in
             docker-ssh-with-tty "$@"
         fi
     ;;
+    ssh-no-tty)
+        docker-ssh "$@"
+    ;;
     cifs)
         docker-mount-cifs "$@"
     ;;
@@ -490,6 +493,7 @@ case "$SHELL_DOCKER_ACTION" in
     run|start|stop|kill)
         docker-refresh-port-forwards
         docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" "$@"
+        docker-refresh-port-forwards
     ;;
     *)
         # default run docker command on remote host
