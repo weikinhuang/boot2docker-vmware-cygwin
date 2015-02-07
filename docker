@@ -458,6 +458,35 @@ case "$SHELL_DOCKER_ACTION" in
     download)
         docker-download-iso
     ;;
+    help)
+        docker-ssh docker help "$@"
+        if [[ $# == 0 ]]; then
+            echo
+            echo 'Additional options for windows docker script:'
+            echo
+            echo '    cifs      Mount a local share on the boot2docker vm'
+            echo '    clean     Remove all docker images and containers'
+            echo '    createvm  Create the boot2docker vm'
+            echo '    destroyvm Destroy the boot2docker vm'
+            echo '    down      Stop the boot2docker vm'
+            echo '    download  Download the latest boot2docker.iso'
+            echo '    forward   Start the port forwarding managing server'
+            echo '    forwarded-ports List published ports from all containers'
+            echo '    forward-kill    Stop port forwarding managing server'
+            echo '    forward-pid     Get the port forwarding managing server pid'
+            echo '    forward-ports   List active ports forwarded to the host'
+            echo '    forward-reload  Notify the port forwarding managing server of port changes'
+            echo '    get       Get a file from the boot2docker vm'
+            echo '    init      Initialize the boot2docker vm'
+            echo '    initvm    Create and initialize the boot2docker vm'
+            echo '    ip        Get the ip of the boot2docker vm'
+            echo '    put       Send a file to the boot2docker vm'
+            echo '    reboot    reboot the boot2docker vm'
+            echo '    ssh       SSH into docker server or run remote commands'
+            echo '    up        Start the boot2docker vm'
+            echo '    vmrun     Run a vmware command against boot2docker vm'
+        fi
+    ;;
     run|start|stop|kill)
         docker-refresh-port-forwards
         docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" "$@"
