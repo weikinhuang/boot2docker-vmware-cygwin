@@ -21,6 +21,10 @@ function docker-ssh () {
     ssh ${SSH_OPTIONS} docker@$(docker-host) -- $(printf '%q ' "$@")
 }
 
+function docker-ssh-batch-mode () {
+    ssh ${SSH_OPTIONS} -o 'Batchmode yes' docker@$(docker-host) -- "$@"
+}
+
 function docker-ssh-with-tty () {
     ssh ${SSH_OPTIONS} -t docker@$(docker-host) -- $(printf '%q ' "$@")
 }
@@ -389,22 +393,25 @@ case "$SHELL_DOCKER_ACTION" in
     ssh-no-tty)
         docker-ssh "$@"
     ;;
+    ssh-batch)
+        docker-ssh-batch-mode "$@"
+    ;;
     cifs)
         docker-mount-cifs "$@"
     ;;
-    forward)
+    fwd)
         docker-start-port-forward-manager
     ;;
-    forward-kill)
+    fwd-kill)
         docker-forward-kill
     ;;
-    forward-reload)
+    fwd-reload)
         docker-refresh-port-forwards
     ;;
-    forward-pid)
+    fwd-pid)
         docker-forward-pid
     ;;
-    forward-ports)
+    fwd-ports)
         docker-forward-ports
     ;;
     forwarded-ports)
@@ -473,12 +480,12 @@ case "$SHELL_DOCKER_ACTION" in
             echo '    destroyvm Destroy the boot2docker vm'
             echo '    down      Stop the boot2docker vm'
             echo '    download  Download the latest boot2docker.iso'
-            echo '    forward   Start the port forwarding managing server'
             echo '    forwarded-ports List published ports from all containers'
-            echo '    forward-kill    Stop port forwarding managing server'
-            echo '    forward-pid     Get the port forwarding managing server pid'
-            echo '    forward-ports   List active ports forwarded to the host'
-            echo '    forward-reload  Notify the port forwarding managing server of port changes'
+            echo '    fwd       Start the port forwarding managing server'
+            echo '    fwd-kill  Stop port forwarding managing server'
+            echo '    fwd-pid   Get the port forwarding managing server pid'
+            echo '    fwd-ports List active ports forwarded to the host'
+            echo '    fwd-reload  Notify the port forwarding managing server of port changes'
             echo '    get       Get a file from the boot2docker vm'
             echo '    init      Initialize the boot2docker vm'
             echo '    initvm    Create and initialize the boot2docker vm'

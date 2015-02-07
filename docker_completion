@@ -885,6 +885,95 @@ _docker_wait() {
 	__docker_containers_all
 }
 
+_docker_cifs() {
+    if [[ $COMP_CWORD == 2 ]]; then
+        COMPREPLY=( $( compgen -W "$(net share | tr -d '\r' | tail -n+5 | head -n -2 | cut -d' ' -f1)" -- "$cur" ) )
+    elif [[ $COMP_CWORD == 3 ]]; then
+        _docker_scp_remote_files -d
+    fi
+}
+
+_docker_get() {
+    if [[ $COMP_CWORD == 2 ]]; then
+        _docker_scp_remote_files
+    elif [[ $COMP_CWORD == 3 ]]; then
+        _docker_scp_local_files -d
+    fi
+}
+
+_docker_put() {
+    if [[ $COMP_CWORD == 2 ]]; then
+        _docker_scp_local_files
+    elif [[ $COMP_CWORD == 3 ]]; then
+        _docker_scp_remote_files -d
+    fi
+}
+
+# things we want to backslash escape in scp paths
+_docker_scp_path_esc='[][(){}<>",:;^&!$=?`|\\'"'"'[:space:]]'
+
+# Complete remote files with ssh.  If the first arg is -d, complete on dirs
+# only.  Returns paths escaped with three backslashes.
+_docker_scp_remote_files()
+{
+    local IFS=$'\n'
+
+    # remove backslash escape from the first colon
+    cur=${cur/\\:/:}
+
+    local userhost=${cur%%?(\\):*}
+    local path=${cur#*:}
+
+    # unescape (3 backslashes to 1 for chars we escaped)
+    path=$( sed -e 's/\\\\\\\('$_docker_scp_path_esc'\)/\\\1/g' <<<"$path" )
+
+    # default to home dir of specified user on remote host
+    if [[ -z $path ]]; then
+        path=$(docker ssh-batch pwd 2>/dev/null)
+    fi
+
+    local files
+    if [[ $1 == -d ]]; then
+        # escape problematic characters; remove non-dirs
+        files=$( docker ssh-batch \
+            command ls -aF1dL "$path*" 2>/dev/null | \
+            sed -e 's/'$_docker_scp_path_esc'/\\\\\\&/g' -e '/[^\/]$/d' )
+    else
+        # escape problematic characters; remove executables, aliases, pipes
+        # and sockets; add space at end of file names
+
+        files=$( docker ssh-batch \
+            command ls -aF1dL "$path"* 2>/dev/null | \
+            sed -e 's/'$_docker_scp_path_esc'/\\\\\\&/g' -e 's/[*@|=]$//g' \
+            -e 's/[^\/]$/& /g' )
+    fi
+    COMPREPLY+=( $files )
+}
+
+# This approach is used instead of _filedir to get a space appended
+# after local file/dir completions, and -o nospace retained for others.
+# If first arg is -d, complete on directory names only.  The next arg is
+# an optional prefix to add to returned completions.
+_docker_scp_local_files()
+{
+    local IFS=$'\n'
+
+    local dirsonly=false
+    if [[ $1 == -d ]]; then
+        dirsonly=true
+        shift
+    fi
+
+    if $dirsonly ; then
+        COMPREPLY+=( $( command ls -aF1dL $cur* 2>/dev/null | \
+            sed -e "s/$_scp_path_esc/\\\\&/g" -e '/[^\/]$/d' -e "s/^/$1/") )
+    else
+        COMPREPLY+=( $( command ls -aF1dL $cur* 2>/dev/null | \
+            sed -e "s/$_scp_path_esc/\\\\&/g" -e 's/[*@|=]$//g' \
+            -e 's/[^\/]$/& /g' -e "s/^/$1/") )
+    fi
+}
+
 _docker() {
 	local previous_extglob_setting=$(shopt -p extglob)
 	shopt -s extglob
@@ -928,6 +1017,28 @@ _docker() {
 		unpause
 		version
 		wait
+
+		cifs
+		clean
+		createvm
+		destroyvm
+		down
+		download
+		fwd
+		forwarded-ports
+		fwd-kill
+		fwd-pid
+		fwd-ports
+		fwd-reload
+		get
+		init
+		initvm
+		ip
+		put
+		reboot
+		ssh
+		up
+		vmrun
 	)
 
 	local main_options_with_args="
