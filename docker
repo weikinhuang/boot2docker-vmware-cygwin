@@ -426,7 +426,7 @@ case "$SHELL_DOCKER_ACTION" in
     initvm)
         docker-create-vm
         docker-download-iso
-        docker-vm-up
+        docker-vmup
         sleep 120
         docker-vm-init
     ;;
