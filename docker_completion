@@ -27,7 +27,7 @@
 # This order should be applied to lists, alternatives and code blocks.
 
 __docker_q() {
-	docker ssh-no-tty docker 2>/dev/null "$@"
+	docker 2>/dev/null "$@"
 }
 
 __docker_containers_all() {

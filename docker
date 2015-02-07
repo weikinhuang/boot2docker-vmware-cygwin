@@ -18,7 +18,7 @@ function docker-host () {
 }
 
 function docker-ssh () {
-    ssh ${SSH_OPTIONS} docker@$(docker-host) -- $(printf '%q ' "$@")
+    ssh ${SSH_OPTIONS} docker@$(docker-host) -- "$@"
 }
 
 function docker-ssh-batch-mode () {
@@ -26,7 +26,7 @@ function docker-ssh-batch-mode () {
 }
 
 function docker-ssh-with-tty () {
-    ssh ${SSH_OPTIONS} -t docker@$(docker-host) -- $(printf '%q ' "$@")
+    ssh ${SSH_OPTIONS} -t docker@$(docker-host) -- "$@"
 }
 
 function docker-mount-cifs () {
@@ -349,6 +349,8 @@ if [[ ! -e /etc/rc.d/vmtoolsd ]]; then
     /usr/local/bin/vmtoolsd --background /var/run/vmtoolsd.pid
 fi
 
+echo > /var/lib/boot2docker/docker.log
+
 BOOT2DOCKER_INIT_SCRIPT
 
 sudo chmod 755 /mnt/sda1/var/lib/boot2docker/bootlocal.sh
@@ -357,8 +359,6 @@ sudo tee /mnt/sda1/var/lib/boot2docker/profile << BOOT2DOCKER_PROFILE_SCRIPT
 #!/bin/sh
 
 EXTRA_ARGS="--insecure-registry localhost"
-
-alias ll="ls -l"
 
 BOOT2DOCKER_PROFILE_SCRIPT
 
@@ -504,6 +504,12 @@ case "$SHELL_DOCKER_ACTION" in
     ;;
     *)
         # default run docker command on remote host
-        docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" "$@"
+        if [[ ! -t 0 || ! -t 1 ]]; then
+            # pipe mode
+            docker-ssh docker "$SHELL_DOCKER_ACTION" $(printf '%q ' "$@")
+        else
+            # non pipe mode
+            docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" $(printf '%q ' "$@")
+        fi
     ;;
 esac
