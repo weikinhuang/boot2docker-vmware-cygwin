@@ -373,10 +373,6 @@ mkdir /mnt/datashare &>/dev/null || true
 
 su - docker -c 'tce-load -i /var/lib/boot2docker/tcz/*.tcz'
 
-echo search localdomain > /etc/resolv.conf
-echo nameserver 8.8.8.8 >> /etc/resolv.conf
-echo nameserver 8.8.4.4 >> /etc/resolv.conf
-
 if [[ ! -e /etc/rc.d/vmtoolsd ]]; then
     /usr/local/bin/vmtoolsd --background /var/run/vmtoolsd.pid
 fi
