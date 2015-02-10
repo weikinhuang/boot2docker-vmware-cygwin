@@ -41,6 +41,38 @@ function docker-mount-cifs () {
     docker-ssh "sudo mount -tcifs '-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777' '//${NAT_HOST}/$LOCAL_FOLDER' '$REMOTE_FOLDER'"
 }
 
+# list things that should have been shared...
+function docker-vm-list-shares () {
+    local vm_shares="$(cat "$(cygpath "$VMPATH")" | grep sharedFolder | grep 'hostPath\|guestName' | tr -d '\r')"
+    local vm_shares_idx="$(echo "${vm_shares}" | cut -d'.' -f1 | sort | uniq)"
+    local idx
+    local fol mnt
+
+    local IFS=$'\n'
+    for idx in "${vm_shares_idx}"; do
+        fol="$(cygpath -u "$(echo "${vm_shares}" | grep "^${idx}.hostPath" | sed 's#^'${idx}'.hostPath = "\(.\+\)"$#\1#')")"
+        mnt="/mnt/hgfs/$(echo "${vm_shares}" | grep "^${idx}.guestName" | sed 's#^'${idx}'.guestName = "\(.\+\)"$#\1#')"
+        echo "${fol}:${mnt}"
+    done
+    unset IFS
+}
+
+function docker-get-mapped-share-name () {
+    local cwd="$(realpath "$1")"
+    local IFS=$'\n'
+    local map dir
+    # see if we're in a mapped path
+    for map in "$(docker-vm-list-shares)"; do
+        dir="$(echo "${map}" | cut -d':' -f1)"
+        if [[ "${cwd}" =~ ^"${dir}" ]]; then
+            echo "$(echo "${map}" | cut -d':' -f2)/$(echo "$cwd" | sed "s!^${dir}/!!")"
+            return 0
+        fi
+    done
+    unset IFS
+    return 1
+}
+
 function docker-refresh-port-forwards () {
     curl -q -m 3 localhost:${FORWARDS_SERVER_PORT} &>/dev/null
 }
@@ -501,6 +533,9 @@ case "$SHELL_DOCKER_ACTION" in
         docker-refresh-port-forwards
         docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" "$@"
         docker-refresh-port-forwards
+    ;;
+    build)
+        docker-ssh-with-tty docker build "$@"
     ;;
     *)
         # default run docker command on remote host
