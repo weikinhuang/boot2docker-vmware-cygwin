@@ -1,0 +1,12 @@
+--- configure.ac.orig   2014-07-01 22:21:14.000000000 +0000
++++ configure.ac        2015-02-11 15:12:16.133547845 +0000
+@@ -942,8 +942,7 @@
+ 
+    LIBVMTOOLS_LIBADD="$LIBVMTOOLS_LIBADD -lrt"
+ 
+-   MODULES="$MODULES vmsync vmci vsock"
+-   MODULES="$MODULES vmxnet vmblock vmhgfs"
++   MODULES="$MODULES vmblock vmhgfs"
+    buildHgfsmounter=yes
+ fi
+ 
