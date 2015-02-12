@@ -893,6 +893,14 @@ _docker_cifs() {
     fi
 }
 
+_docker_fwd() {
+    COMPREPLY=( $( compgen -W "pid ports published reload start stop" -- "$cur" ) )
+}
+
+_docker_vm() {
+    COMPREPLY=( $( compgen -W "build create destroy download init reboot run" -- "$cur" ) )
+}
+
 _docker_get() {
     if [[ $COMP_CWORD == 2 ]]; then
         _docker_scp_remote_files
@@ -1020,25 +1028,14 @@ _docker() {
 
 		cifs
 		clean
-		createvm
-		destroyvm
 		down
-		download
 		fwd
-		forwarded-ports
-		fwd-kill
-		fwd-pid
-		fwd-ports
-		fwd-reload
 		get
-		init
-		initvm
 		ip
 		put
-		reboot
 		ssh
 		up
-		vmrun
+		vm
 	)
 
 	local main_options_with_args="

@@ -150,7 +150,7 @@ function killActiveTunnel() {
     }
 }
 function updatePorts() {
-    child_process.exec("bash docker forwarded-ports", function(err, stdout, stderr) {
+    child_process.exec("bash docker fwd published", function(err, stdout, stderr) {
         if (stderr) {
             process.stderr.write(stderr);
         }
@@ -241,7 +241,8 @@ require("https").get({
 });
 EOF
 )"
-    local LATEST_BOOT2DOCKER_TAG="$("$NODE_BIN" -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
+    #local LATEST_BOOT2DOCKER_TAG="$("$NODE_BIN" -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
+    local LATEST_BOOT2DOCKER_TAG="v1.5.0"
     if [[ -n "$LATEST_BOOT2DOCKER_TAG" ]] && [[ "$LATEST_BOOT2DOCKER_TAG" != "v0.0.0" ]]; then
         echo "https://github.com/boot2docker/boot2docker/releases/download/${LATEST_BOOT2DOCKER_TAG}/boot2docker.iso"
     else
@@ -432,22 +433,31 @@ case "$SHELL_DOCKER_ACTION" in
         docker-mount-cifs "$@"
     ;;
     fwd)
-        docker-start-port-forward-manager
-    ;;
-    fwd-kill)
-        docker-forward-kill
-    ;;
-    fwd-reload)
-        docker-refresh-port-forwards
-    ;;
-    fwd-pid)
-        docker-forward-pid
-    ;;
-    fwd-ports)
-        docker-forward-ports
-    ;;
-    forwarded-ports)
-        docker-ssh 'for x in $(docker ps -q); do docker port $x; done'
+        SHELL_DOCKER_SUBACTION="$2"
+        shift
+        case "$SHELL_DOCKER_SUBACTION" in
+            pid)
+                docker-forward-pid
+            ;;
+            ports)
+                docker-forward-ports
+            ;;
+            published)
+                docker-ssh 'for x in $(docker ps -q); do docker port $x; done'
+            ;;
+            reload)
+                docker-refresh-port-forwards
+            ;;
+            start)
+                docker-start-port-forward-manager
+            ;;
+            stop)
+                docker-forward-kill
+            ;;
+            *)
+                exit 1
+            ;;
+        esac
     ;;
     get)
         docker-get "$@"
@@ -455,30 +465,48 @@ case "$SHELL_DOCKER_ACTION" in
     put)
         docker-put "$@"
     ;;
-    initvm)
-        docker-create-vm
-        docker-download-iso
-        docker-vmup
-        sleep 120
-        docker-vm-init
-    ;;
-    createvm)
-        docker-create-vm
-        docker-download-iso
-    ;;
-    destroyvm)
-        docker-destroy-vm
-    ;;
-    init)
-        docker-vm-init
+    vm)
+        SHELL_DOCKER_SUBACTION="$2"
+        shift
+        case "$SHELL_DOCKER_SUBACTION" in
+            build)
+                docker-create-vm
+                docker-download-iso
+                docker-vmup
+                sleep 120
+                docker-vm-init
+            ;;
+            create)
+                docker-create-vm
+                docker-download-iso
+            ;;
+            destroy)
+                docker-destroy-vm
+            ;;
+            download)
+                docker-download-iso
+            ;;
+            init)
+                docker-vm-init
+            ;;
+            reboot)
+                docker-forward-kill
+                docker-reboot
+                sleep 20
+                docker-start-port-forward-manager
+            ;;
+            run)
+                docker-vmrun "$@"
+            ;;
+            *)
+                exit 1
+            ;;
+        esac
     ;;
     clean)
         echo "Cleaning ALL up docker images"
         docker-ssh docker rm '$(docker ps -a | grep Exited | awk "{ print $1 }")'
         docker-ssh docker rmi '$(docker images -aq)'
-    ;;
-    vmrun)
-        docker-vmrun "$@"
     ;;
     ip)
         docker-ip
@@ -491,15 +519,6 @@ case "$SHELL_DOCKER_ACTION" in
         docker-forward-kill
         docker-vmdown
     ;;
-    reboot)
-        docker-forward-kill
-        docker-reboot
-        sleep 20
-        docker-start-port-forward-manager
-    ;;
-    download)
-        docker-download-iso
-    ;;
     help)
         docker-ssh docker help "$@"
         if [[ $# == 0 ]]; then
@@ -508,25 +527,27 @@ case "$SHELL_DOCKER_ACTION" in
             echo
             echo '    cifs      Mount a local share on the boot2docker vm'
             echo '    clean     Remove all docker images and containers'
-            echo '    createvm  Create the boot2docker vm'
-            echo '    destroyvm Destroy the boot2docker vm'
             echo '    down      Stop the boot2docker vm'
-            echo '    download  Download the latest boot2docker.iso'
-            echo '    forwarded-ports List published ports from all containers'
-            echo '    fwd       Start the port forwarding managing server'
-            echo '    fwd-kill  Stop port forwarding managing server'
-            echo '    fwd-pid   Get the port forwarding managing server pid'
-            echo '    fwd-ports List active ports forwarded to the host'
-            echo '    fwd-reload  Notify the port forwarding managing server of port changes'
+            echo '    fwd       Forwarding server, subactions:'
+            echo '    ├ pid         Get the port forwarding managing server pid'
+            echo '    ├ ports       List active ports forwarded to the host'
+            echo '    ├ published   List published ports from all containers'
+            echo '    ├ reload      Notify the port forwarding managing server of port changes'
+            echo '    ├ start       Start the port forwarding managing server'
+            echo '    └ stop        Stop port forwarding managing server'
             echo '    get       Get a file from the boot2docker vm'
-            echo '    init      Initialize the boot2docker vm'
-            echo '    initvm    Create and initialize the boot2docker vm'
             echo '    ip        Get the ip of the boot2docker vm'
             echo '    put       Send a file to the boot2docker vm'
-            echo '    reboot    reboot the boot2docker vm'
             echo '    ssh       SSH into docker server or run remote commands'
             echo '    up        Start the boot2docker vm'
-            echo '    vmrun     Run a vmware command against boot2docker vm'
+            echo '    vm        Execute actions against the virtual machine, subactions:'
+            echo '    ├ build       Create and initialize the boot2docker vm'
+            echo '    ├ create      Create the boot2docker vm'
+            echo '    ├ destroy     Destroy the boot2docker vm'
+            echo '    ├ download    Download the latest boot2docker.iso'
+            echo '    ├ init        Initialize the boot2docker vm'
+            echo '    ├ reboot      Reboot the boot2docker vm'
+            echo '    └ run         Run a vmware command against boot2docker vm'
         fi
     ;;
     run|start|stop|kill)
@@ -535,6 +556,11 @@ case "$SHELL_DOCKER_ACTION" in
         docker-refresh-port-forwards
     ;;
     build)
+        LAST_ARG="${@: -1}"
+        if [[ -z $LAST_ARG || $LAST_ARG =~ ^- || $LAST_ARG == '-' || $LAST_ARG == '.' || -e $LAST_ARG ]]; then
+            echo 'cd to here first'
+        fi
+        exit 1
         docker-ssh-with-tty docker build "$@"
     ;;
     *)
