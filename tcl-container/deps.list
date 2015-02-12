@@ -56,3 +56,4 @@ linux-kernel-sources-env.tcz
 bash.tcz
 compiletc.tcz
 ncurses-dev.tcz
+squashfs-tools-4.x.tcz
