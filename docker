@@ -54,6 +54,11 @@ docker-ls-admin-shares () {
 }
 
 docker-mount-all-admin-shares () {
+    # only mount when cifs is installed
+    if ! docker-ssh 'type mount.cifs &>/dev/null'; then
+        return 1
+    fi
+
     for share in $(docker-ls-admin-shares | tr '\n' ' '); do
         docker-mount-cifs "$share"
     done
@@ -237,8 +242,8 @@ EOF
 
 function docker-boot2docker-iso-url () {
     # use cloudnativeapps version for vmware support for now
-    echo "https://github.com/cloudnativeapps/boot2docker/releases/download/v1.4.1-vmw/boot2docker-1.4.1-vmw.iso"
-    exit 0
+    #echo "https://github.com/cloudnativeapps/boot2docker/releases/download/v1.4.1-vmw/boot2docker-1.4.1-vmw.iso"
+    #return 0
 
 GET_LATEST_BOOT2DOCKER_TAG="$(
 cat << EOF
@@ -345,13 +350,8 @@ sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-terminfo.tcz \$TCL_REPO_B
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-utils.tcz \$TCL_REPO_BASE/tcz/ncurses-utils.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses.tcz \$TCL_REPO_BASE/tcz/ncurses.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/htop.tcz \$TCL_REPO_BASE/tcz/htop.tcz
-sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/openssl-1.0.0.tcz \$TCL_REPO_BASE/tcz/openssl-1.0.0.tcz
-sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/wget.tcz \$TCL_REPO_BASE/tcz/wget.tcz
 
-tce-load -iw /var/lib/boot2docker/tcz/openssl-1.0.0.tcz
-tce-load -iw /var/lib/boot2docker/tcz/wget.tcz
-
-sudo wget --no-check-certificate -O /mnt/sda1/var/lib/boot2docker/udhcpc-default.script https://raw.githubusercontent.com/SvenDowideit/boot2docker/noclobber-resolve.conf/rootfs/rootfs/usr/share/udhcpc/default.script
+sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/udhcpc-default.script https://raw.githubusercontent.com/SvenDowideit/boot2docker/noclobber-resolve.conf/rootfs/rootfs/usr/share/udhcpc/default.script
 sudo chmod 755 /mnt/sda1/var/lib/boot2docker/udhcpc-default.script
 
 echo -e "\033[0m"
