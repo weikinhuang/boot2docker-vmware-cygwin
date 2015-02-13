@@ -45,7 +45,6 @@ function docker-mount-cifs () {
 sudo mkdir -p "${REMOTE_FOLDER}";
 sudo mount -tcifs "-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777" \
     "//${NAT_HOST}/${LOCAL_FOLDER}" "${REMOTE_FOLDER}"
-sudo ln -s "${REMOTE_FOLDER}" "/${LOCAL_FOLDER_CLEANNAME}"
 DOCKER_MOUNT_SHARE
 }
 
@@ -582,7 +581,54 @@ case "$SHELL_DOCKER_ACTION" in
             echo '    └ run         Run a vmware command against boot2docker vm'
         fi
     ;;
-    run|start|stop|kill)
+    run)
+        docker-refresh-port-forwards
+        args=( )
+        prev_arg=
+
+        for arg in "$@"; do
+            # if argument is a file, then expand it to windows paths
+            if [[ "$arg" =~ ^-v. ]]; then
+                # this is a volume indicator
+                dir="$(echo "${arg}" | sed 's/^-v//' | cut -d':' -f1)"
+                if [[ -e "$dir" && "$dir" != '/tmp' ]]; then
+                    map="$(echo "${arg}" | cut -d':' -f2)"
+                    res="/mnt/hgfs$(realpath "${dir}")"
+                    if [[ -n "$map" && "$arg" =~ : ]]; then
+                        res="${res}:${map}"
+                    else
+                        res="${res}:$(realpath "${dir}")"
+                    fi
+                else
+                    res="${arg}"
+                fi
+                args=("${args[@]}" "-v" "$(printf '%q ' "${res}")")
+            elif [[ "$prev_arg" == '-v' ]]; then
+                # previous arg was a volume indicator
+                dir="$(echo "${arg}" | cut -d':' -f1)"
+                if [[ -e "$dir" && "$dir" != '/tmp' ]]; then
+                    map="$(echo "${arg}" | cut -d':' -f2)"
+                    res="/mnt/hgfs$(realpath "${dir}")"
+                    if [[ -n "$map" && "$arg" =~ : ]]; then
+                        res="${res}:${map}"
+                    else
+                        res="${res}:$(realpath "${dir}")"
+                    fi
+                else
+                    res="${arg}"
+                fi
+                args=("${args[@]}" "$(printf '%q ' "${res}")")
+            else
+                # append
+                args=("${args[@]}" "$arg")
+            fi
+            prev_arg="$arg"
+        done
+        # send the remapped volume paths
+        docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" "${args[@]}"
+        docker-refresh-port-forwards
+    ;;
+    start|stop|kill)
         docker-refresh-port-forwards
         docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" "$@"
         docker-refresh-port-forwards
