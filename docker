@@ -29,16 +29,34 @@ function docker-ssh-with-tty () {
     ssh ${SSH_OPTIONS} -t docker@$(docker-host) -- "$@"
 }
 
+# these 3 functions are because we don't have vmware shared folders yet
+# http://blog.tutum.co/2014/11/05/how-to-use-docker-on-windows/
 function docker-mount-cifs () {
-    local CIFS_PASSWORD
     local LOCAL_FOLDER="$1"
-    local REMOTE_FOLDER="${2-/mnt/datashare}"
+    local LOCAL_FOLDER_CLEANNAME="$(echo "$LOCAL_FOLDER" | sed 's/\$$//')"
+    local REMOTE_FOLDER="${2-/mnt/hgfs/$LOCAL_FOLDER_CLEANNAME}"
     local NAT_HOST="$(docker-host | sed 's/\.[0-9]\+$//').1"
-    # http://blog.tutum.co/2014/11/05/how-to-use-docker-on-windows/
-    echo -ne "\033[0;32mEnter CIFS share password: \033[0m"
-    read -s -p "" CIFS_PASSWORD
-    echo
-    docker-ssh "sudo mount -tcifs '-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777' '//${NAT_HOST}/$LOCAL_FOLDER' '$REMOTE_FOLDER'"
+    if [[ -z "$CIFS_PASSWORD" ]]; then
+        echo -ne "\033[0;32mEnter CIFS share password: \033[0m"
+        read -s -p "" CIFS_PASSWORD
+        echo
+    fi
+    docker-ssh << DOCKER_MOUNT_SHARE
+sudo mkdir -p "${REMOTE_FOLDER}";
+sudo mount -tcifs "-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777" \
+    "//${NAT_HOST}/${LOCAL_FOLDER}" "${REMOTE_FOLDER}"
+sudo ln -s "${REMOTE_FOLDER}" "/${LOCAL_FOLDER_CLEANNAME}"
+DOCKER_MOUNT_SHARE
+}
+
+docker-ls-admin-shares () {
+    net share | tr -d '\r' | grep 'Default share' | cut -d ' ' -f1 | tr '[:upper:]' '[:lower:]'
+}
+
+docker-mount-all-admin-shares () {
+    for share in $(docker-ls-admin-shares | tr '\n' ' '); do
+        docker-mount-cifs "$share"
+    done
 }
 
 # list things that should have been shared...
@@ -504,6 +522,7 @@ case "$SHELL_DOCKER_ACTION" in
                 docker-forward-kill
                 docker-reboot
                 sleep 20
+                docker-mount-all-admin-shares
                 docker-start-port-forward-manager
             ;;
             run)
@@ -524,6 +543,8 @@ case "$SHELL_DOCKER_ACTION" in
     ;;
     up)
         docker-vmup
+        sleep 20
+        docker-mount-all-admin-shares
         docker-start-port-forward-manager
     ;;
     down)
@@ -567,12 +588,8 @@ case "$SHELL_DOCKER_ACTION" in
         docker-refresh-port-forwards
     ;;
     build)
-        LAST_ARG="${@: -1}"
-        if [[ -z $LAST_ARG || $LAST_ARG =~ ^- || $LAST_ARG == '-' || $LAST_ARG == '.' || -e $LAST_ARG ]]; then
-            echo 'cd to here first'
-        fi
-        exit 1
-        docker-ssh-with-tty docker build "$@"
+        # always try to change the working directory to $PWD
+        docker-ssh-with-tty cd $(printf '%q ' "$(realpath "$(pwd)")") &>/dev/null \; docker build "$@"
     ;;
     *)
         # default run docker command on remote host
