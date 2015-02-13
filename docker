@@ -327,6 +327,15 @@ sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-terminfo.tcz \$TCL_REPO_B
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-utils.tcz \$TCL_REPO_BASE/tcz/ncurses-utils.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses.tcz \$TCL_REPO_BASE/tcz/ncurses.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/htop.tcz \$TCL_REPO_BASE/tcz/htop.tcz
+sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/openssl-1.0.0.tcz \$TCL_REPO_BASE/tcz/openssl-1.0.0.tcz
+sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/wget.tcz \$TCL_REPO_BASE/tcz/wget.tcz
+
+tce-load -iw /var/lib/boot2docker/tcz/openssl-1.0.0.tcz
+tce-load -iw /var/lib/boot2docker/tcz/wget.tcz
+
+sudo wget --no-check-certificate -O /mnt/sda1/var/lib/boot2docker/udhcpc-default.script https://raw.githubusercontent.com/SvenDowideit/boot2docker/noclobber-resolve.conf/rootfs/rootfs/usr/share/udhcpc/default.script
+sudo chmod 755 /mnt/sda1/var/lib/boot2docker/udhcpc-default.script
+
 echo -e "\033[0m"
 
 if [[ ! -e /usr/local/bin/vmtoolsd ]]; then
@@ -377,6 +386,8 @@ su - docker -c 'tce-load -i /var/lib/boot2docker/tcz/*.tcz'
 echo search localdomain > /etc/resolv.conf
 echo nameserver 8.8.8.8 >> /etc/resolv.conf
 echo nameserver 8.8.4.4 >> /etc/resolv.conf
+
+/bin/cp /mnt/sda1/var/lib/boot2docker/udhcpc-default.script /usr/share/udhcpc/default.script
 
 if [[ ! -e /etc/rc.d/vmtoolsd ]]; then
     /usr/local/bin/vmtoolsd --background /var/run/vmtoolsd.pid
@@ -433,7 +444,7 @@ case "$SHELL_DOCKER_ACTION" in
         docker-mount-cifs "$@"
     ;;
     fwd)
-        SHELL_DOCKER_SUBACTION="$2"
+        SHELL_DOCKER_SUBACTION="$1"
         shift
         case "$SHELL_DOCKER_SUBACTION" in
             pid)
@@ -466,7 +477,7 @@ case "$SHELL_DOCKER_ACTION" in
         docker-put "$@"
     ;;
     vm)
-        SHELL_DOCKER_SUBACTION="$2"
+        SHELL_DOCKER_SUBACTION="$1"
         shift
         case "$SHELL_DOCKER_SUBACTION" in
             build)
