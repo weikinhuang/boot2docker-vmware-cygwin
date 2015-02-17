@@ -334,10 +334,6 @@ sudo tar -vcf /mnt/sda1/var/lib/boot2docker/userdata.tar .ssh .ash_history
 cd "\$WORKING_DIR"
 echo -e "\033[0m"
 
-echo search localdomain > /etc/resolv.conf
-echo nameserver 8.8.8.8 >> /etc/resolv.conf
-echo nameserver 8.8.4.4 >> /etc/resolv.conf
-
 echo -e "\033[0;32mDownloading additional modules\033[0m"
 
 echo -e "\033[0;34m"
@@ -399,10 +395,6 @@ sudo tee /mnt/sda1/var/lib/boot2docker/bootlocal.sh << BOOT2DOCKER_INIT_SCRIPT
 mkdir /mnt/datashare &>/dev/null || true
 
 su - docker -c 'tce-load -i /var/lib/boot2docker/tcz/*.tcz'
-
-echo search localdomain > /etc/resolv.conf
-echo nameserver 8.8.8.8 >> /etc/resolv.conf
-echo nameserver 8.8.4.4 >> /etc/resolv.conf
 
 /bin/cp /mnt/sda1/var/lib/boot2docker/udhcpc-default.script /usr/share/udhcpc/default.script
 
