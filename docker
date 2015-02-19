@@ -624,7 +624,7 @@ case "$SHELL_DOCKER_ACTION" in
     ;;
     build)
         # always try to change the working directory to $PWD
-        docker-ssh-with-tty cd $(printf '%q' "$(realpath "$(pwd)")") &>/dev/null \; docker build "$@"
+        docker-ssh-with-tty cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker build "$@"
     ;;
     *)
         # default run docker command on remote host
