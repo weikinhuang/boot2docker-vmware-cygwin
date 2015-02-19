@@ -138,8 +138,8 @@ function docker-put () {
 
 function docker-create-vm () {
     mkdir -p "${VMDIR}"
-    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmx" > "${VMDIR}/boot2docker.vmx"
-    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.tar.gz" | tar -zxO > "${VMDIR}/boot2docker.vmdk"
+    curl -L# "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmx" > "${VMDIR}/boot2docker.vmx"
+    curl -L# "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.tar.gz" | tar -zxO > "${VMDIR}/boot2docker.vmdk"
 
     # allow access to all cores
     local PROC_CORES=$(grep "^processor" -c /proc/cpuinfo)
@@ -148,7 +148,7 @@ function docker-create-vm () {
 }
 
 function docker-destroy-vm () {
-    "$SCRIPT" down
+    docker-vmrun stop hard
     rm -rf "$VMDIR"
 }
 
@@ -167,7 +167,7 @@ function docker-vmup () {
 }
 
 function docker-vmdown () {
-    docker-vmrun stop hard
+    docker-vmrun stop
 }
 
 function docker-reboot () {
@@ -295,12 +295,10 @@ function docker-download-iso () {
     fi
 
     local ISO_PATH="$VMDIR/boot2docker.iso"
-    echo "Downloading boot2docker..."
-    curl -L --progress-bar "$ISO_URL" > "$ISO_PATH.new"
+    curl -L# "$ISO_URL" > "$ISO_PATH.new"
     if [[ $? == 0 ]]; then
         rm -f "$ISO_PATH" || true
         mv "$ISO_PATH.new" "$ISO_PATH"
-        echo "Downloaded boot2docker!"
     else
         echo "Failed to download!"
         exit 1
@@ -345,10 +343,24 @@ sudo chown docker /mnt/sda1/var/lib/boot2docker/.ash_history
 chmod 600 /home/docker/.ssh/authorized_keys
 cat /home/docker/.ssh/authorized_keys | grep "${ID_RSA_PUB}" || echo "${ID_RSA_PUB}" >> /home/docker/.ssh/authorized_keys
 cd /home/docker
+
+# write history options
+# Don't put duplicate lines in the history.
+echo "export HISTCONTROL=\\\$HISTCONTROL\\\${HISTCONTROL+,}ignoredups" >> /home/docker/.profile
+# Ignore some controlling instructions: exit, ls, empty cd, pwd, date, help pages
+echo "export HISTIGNORE=\\\$'[ \t]*:&:[fb]g:exit:ls:ls -?::ls -??:ll:history:cd:cd -:cd ~:cd ..:..:pwd:date:* --help'" >> /home/docker/.profile
+# Larger bash history (allow 32³ entries; default is 500)
+echo "export HISTSIZE=32768" >> /home/docker/.profile
+echo "export HISTFILESIZE=32768" >> /home/docker/.profile
+
 ln -sf /var/lib/boot2docker/.ash_history .ash_history
-sudo tar -vcf /mnt/sda1/var/lib/boot2docker/userdata.tar .ssh .ash_history
+sudo tar -vcf /mnt/sda1/var/lib/boot2docker/userdata.tar .ssh .ash_history .profile
 cd "\$WORKING_DIR"
 echo -e "\033[0m"
+
+echo search localdomain > /etc/resolv.conf
+echo nameserver 8.8.8.8 >> /etc/resolv.conf
+echo nameserver 8.8.4.4 >> /etc/resolv.conf
 
 echo -e "\033[0;32mDownloading additional modules\033[0m"
 
@@ -362,7 +374,7 @@ sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-utils.tcz \$TCL_REPO_BASE
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses.tcz \$TCL_REPO_BASE/tcz/ncurses.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/htop.tcz \$TCL_REPO_BASE/tcz/htop.tcz
 
-sudo curl -L -q -o /mnt/sda1/var/lib/boot2docker/udhcpc-default.script https://raw.githubusercontent.com/SvenDowideit/boot2docker/noclobber-resolve.conf/rootfs/rootfs/usr/share/udhcpc/default.script
+sudo curl -L# -o /mnt/sda1/var/lib/boot2docker/udhcpc-default.script https://raw.githubusercontent.com/SvenDowideit/boot2docker/noclobber-resolve.conf/rootfs/rootfs/usr/share/udhcpc/default.script
 sudo chmod 755 /mnt/sda1/var/lib/boot2docker/udhcpc-default.script
 
 echo -e "\033[0m"
@@ -382,18 +394,19 @@ sudo mkdir /tmp/libdnet
 sudo mkdir /tmp/open-vm-tools
 curl -L# https://github.com/vmware/tcl-container/releases/download/v9.4.6/libdnet.tgz | sudo tar -C /tmp/libdnet -xz
 curl -L# https://github.com/vmware/tcl-container/releases/download/v9.4.6/open-vm-tools.tgz | sudo tar -C /tmp/open-vm-tools -xz
-sudo tee /tmp/open-vm-tools/usr/local/bin/lsb_release << OVT_LSB_RELEASE_INIT_SCRIPT
-#!/bin/sh
-# just to make open-vm-tools happy, nad fake output
-# of lsb_release -sd
-. /etc/os-release
-echo \\\$PRETTY_NAME
-exit 0
-OVT_LSB_RELEASE_INIT_SCRIPT
-sudo chmod 755 /tmp/open-vm-tools/usr/local/bin/lsb_release
 sudo mkdir -p /tmp/open-vm-tools/etc/vmware-tools/scripts/vmware
-sudo curl -L -q -o /tmp/open-vm-tools/etc/vmware-tools/scripts/vmware/network https://raw.githubusercontent.com/vmware/boot2docker/ovt/rootfs/rootfs/etc/vmware-tools/scripts/vmware/network
+sudo mkdir -p /tmp/open-vm-tools/sbin
+sudo mkdir -p /tmp/open-vm-tools/usr/local/bin
+# don't do this yet because do some file detection to start this
+#sudo curl -L# -o /tmp/open-vm-tools/etc/rc.d/vmtoolsd https://raw.githubusercontent.com/frapposelli/boot2docker/vmware-support/rootfs/rootfs/etc/rc.d/vmtoolsd
+sudo curl -L# -o /tmp/open-vm-tools/etc/vmware-tools/scripts/vmware/network https://raw.githubusercontent.com/frapposelli/boot2docker/vmware-support/rootfs/rootfs/etc/vmware-tools/scripts/vmware/network
+sudo curl -L# -o /tmp/open-vm-tools/sbin/shutdown https://raw.githubusercontent.com/frapposelli/boot2docker/vmware-support/rootfs/rootfs/sbin/shutdown
+sudo curl -L# -o /tmp/open-vm-tools/usr/local/bin/lsb_release https://raw.githubusercontent.com/frapposelli/boot2docker/vmware-support/rootfs/rootfs/usr/local/bin/lsb_release
+
 sudo chmod 755 /tmp/open-vm-tools/etc/vmware-tools/scripts/vmware/network
+sudo chmod 755 /tmp/open-vm-tools/sbin/shutdown
+sudo chmod 755 /tmp/open-vm-tools/usr/local/bin/lsb_release
+
 cd /tmp
 sudo mksquashfs libdnet /mnt/sda1/var/lib/boot2docker/tcz/libdnet.tcz
 sudo mksquashfs open-vm-tools /mnt/sda1/var/lib/boot2docker/tcz/open-vm-tools.tcz
@@ -504,8 +517,10 @@ case "$SHELL_DOCKER_ACTION" in
                 docker-vm-init
             ;;
             create)
+                echo -e "\033[0;34m"
                 docker-create-vm
                 docker-download-iso
+                echo -e "\033[0m"
             ;;
             destroy)
                 docker-destroy-vm
@@ -515,6 +530,9 @@ case "$SHELL_DOCKER_ACTION" in
             ;;
             init)
                 docker-vm-init
+            ;;
+            mount)
+                docker-mount-all-admin-shares
             ;;
             reboot)
                 docker-forward-kill

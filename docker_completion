@@ -898,7 +898,7 @@ _docker_fwd() {
 }
 
 _docker_vm() {
-    COMPREPLY=( $( compgen -W "build create destroy download init reboot run" -- "$cur" ) )
+    COMPREPLY=( $( compgen -W "build create destroy download init mount reboot run" -- "$cur" ) )
 }
 
 _docker_get() {
