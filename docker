@@ -29,6 +29,17 @@ function docker-ssh-with-tty () {
     ssh ${SSH_OPTIONS} -t docker@$(docker-host) -- "$@"
 }
 
+function docker-escape-args () {
+    if [[ $# == 0 ]]; then
+        return
+    fi
+    args=( )
+    for arg in "$@"; do
+        args=("${args[@]}" $(printf '%q' "$arg"))
+    done
+    echo "${args[@]}"
+}
+
 # these 3 functions are because we don't have vmware shared folders yet
 # http://blog.tutum.co/2014/11/05/how-to-use-docker-on-windows/
 function docker-mount-cifs () {
@@ -201,7 +212,7 @@ function updatePorts() {
         activePorts = ports;
     });
 }
-setTimeout(updatePorts, 5000);
+setTimeout(updatePorts, 3000);
 process.on("exit", killActiveTunnel);
 require("http")
     .createServer(function(request, response) {
@@ -227,7 +238,7 @@ require("http")
                 break;
             case "/":
             default:
-                setTimeout(updatePorts, 5000);
+                setTimeout(updatePorts, 3000);
                 break;
         }
         response.end("");
@@ -595,7 +606,7 @@ case "$SHELL_DOCKER_ACTION" in
                 else
                     res="${arg}"
                 fi
-                args=("${args[@]}" "$(printf '%q ' "${res}")")
+                args=("${args[@]}" "$(printf '%q' "${res}")")
             else
                 # append
                 args=("${args[@]}" "$arg")
@@ -613,16 +624,16 @@ case "$SHELL_DOCKER_ACTION" in
     ;;
     build)
         # always try to change the working directory to $PWD
-        docker-ssh-with-tty cd $(printf '%q ' "$(realpath "$(pwd)")") &>/dev/null \; docker build "$@"
+        docker-ssh-with-tty cd $(printf '%q' "$(realpath "$(pwd)")") &>/dev/null \; docker build "$@"
     ;;
     *)
         # default run docker command on remote host
         if [[ ! -t 0 || ! -t 1 ]]; then
             # pipe mode
-            docker-ssh docker "$SHELL_DOCKER_ACTION" $(printf '%q ' "$@")
+            docker-ssh docker "$SHELL_DOCKER_ACTION" $(docker-escape-args "$@")
         else
             # non pipe mode
-            docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" $(printf '%q ' "$@")
+            docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" $(docker-escape-args "$@")
         fi
     ;;
 esac

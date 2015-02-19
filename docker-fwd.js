@@ -40,7 +40,7 @@ function updatePorts() {
         activePorts = ports;
     });
 }
-setTimeout(updatePorts, 5000);
+setTimeout(updatePorts, 3000);
 process.on("exit", killActiveTunnel);
 require("http")
     .createServer(function(request, response) {
@@ -66,7 +66,7 @@ require("http")
                 break;
             case "/":
             default:
-                setTimeout(updatePorts, 5000);
+                setTimeout(updatePorts, 3000);
                 break;
         }
         response.end("");
