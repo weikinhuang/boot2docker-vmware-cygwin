@@ -136,10 +136,13 @@ function docker-put () {
 
 function docker-create-vm () {
     mkdir -p "${VMDIR}"
-    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmxf" > "${VMDIR}/boot2docker.vmxf"
     curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmx" > "${VMDIR}/boot2docker.vmx"
-    curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmsd" > "${VMDIR}/boot2docker.vmsd"
     curl -L --progress-bar "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.tar.gz" | tar -zxO > "${VMDIR}/boot2docker.vmdk"
+
+    # allow access to all cores
+    local PROC_CORES=$(grep "^processor" -c /proc/cpuinfo)
+    sed -i 's/numvcpus = "[0-9]"/numvcpus = "'${PROC_CORES}'"/' "${VMDIR}/boot2docker.vmx"
+    sed -i 's/cpuid.coresPerSocket = "[0-9]"/cpuid.coresPerSocket = "'${PROC_CORES}'"/' "${VMDIR}/boot2docker.vmx"
 }
 
 function docker-destroy-vm () {
