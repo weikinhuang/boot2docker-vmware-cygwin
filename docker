@@ -18,15 +18,17 @@ function docker-host () {
 }
 
 function docker-ssh () {
-    ssh ${SSH_OPTIONS} docker@$(docker-host) -- "$@"
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        # pipe mode
+        ssh ${SSH_OPTIONS} docker@$(docker-host) -- "$@"
+    else
+        # non pipe mode
+        ssh ${SSH_OPTIONS} -t docker@$(docker-host) -- "$@"
+    fi
 }
 
 function docker-ssh-batch-mode () {
     ssh ${SSH_OPTIONS} -o 'Batchmode yes' docker@$(docker-host) -- "$@"
-}
-
-function docker-ssh-with-tty () {
-    ssh ${SSH_OPTIONS} -t docker@$(docker-host) -- "$@"
 }
 
 function docker-escape-args () {
@@ -449,15 +451,6 @@ SHELL_DOCKER_ACTION="$1"
 shift
 case "$SHELL_DOCKER_ACTION" in
     ssh)
-        if [[ ! -t 0 || ! -t 1 ]]; then
-            # pipe mode
-            docker-ssh "$@"
-        else
-            # non pipe mode
-            docker-ssh-with-tty "$@"
-        fi
-    ;;
-    ssh-no-tty)
         docker-ssh "$@"
     ;;
     ssh-batch)
@@ -617,26 +610,20 @@ case "$SHELL_DOCKER_ACTION" in
             prev_arg="$arg"
         done
         # send the remapped volume paths
-        docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" "${args[@]}"
+        docker-ssh docker "$SHELL_DOCKER_ACTION" "${args[@]}"
         docker-refresh-port-forwards
     ;;
     start|stop|kill)
         docker-refresh-port-forwards
-        docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" "$@"
+        docker-ssh docker "$SHELL_DOCKER_ACTION" "$@"
         docker-refresh-port-forwards
     ;;
     build)
         # always try to change the working directory to $PWD
-        docker-ssh-with-tty cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker build "$@"
+        docker-ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker build "$@"
     ;;
     *)
         # default run docker command on remote host
-        if [[ ! -t 0 || ! -t 1 ]]; then
-            # pipe mode
-            docker-ssh docker "$SHELL_DOCKER_ACTION" $(docker-escape-args "$@")
-        else
-            # non pipe mode
-            docker-ssh-with-tty docker "$SHELL_DOCKER_ACTION" $(docker-escape-args "$@")
-        fi
+        docker-ssh docker "$SHELL_DOCKER_ACTION" $(docker-escape-args "$@")
     ;;
 esac
