@@ -145,6 +145,22 @@ function docker-create-vm () {
     local PROC_CORES=$(grep "^processor" -c /proc/cpuinfo)
     sed -i 's/numvcpus = "[0-9]"/numvcpus = "'${PROC_CORES}'"/' "${VMDIR}/boot2docker.vmx"
     sed -i 's/cpuid.coresPerSocket = "[0-9]"/cpuid.coresPerSocket = "'${PROC_CORES}'"/' "${VMDIR}/boot2docker.vmx"
+
+    # set up shared folders
+    local COUNTER drive
+    COUNTER=0
+    for drive in $(fsutil fsinfo drives | tr -d '\r' | tr ' ' '\n' | tail -n+3 | head -n-1); do
+        echo 'sharedFolder'${COUNTER}'.present = "TRUE"' >> "${VMDIR}/boot2docker.vmx"
+        echo 'sharedFolder'${COUNTER}'.enabled = "TRUE"' >> "${VMDIR}/boot2docker.vmx"
+        echo 'sharedFolder'${COUNTER}'.readAccess = "TRUE"' >> "${VMDIR}/boot2docker.vmx"
+        echo 'sharedFolder'${COUNTER}'.writeAccess = "TRUE"' >> "${VMDIR}/boot2docker.vmx"
+        echo 'sharedFolder'${COUNTER}'.hostPath = "'${drive}'"' >> "${VMDIR}/boot2docker.vmx"
+        echo 'sharedFolder'${COUNTER}'.guestName = "'$(echo "$drive" | cut -d ':' -f 1 | tr '[:upper:]' '[:lower:]')'"' >> "${VMDIR}/boot2docker.vmx"
+        echo 'sharedFolder'${COUNTER}'.expiration = "never"' >> "${VMDIR}/boot2docker.vmx"
+        (( COUNTER += 1 ))
+    done
+    echo 'sharedFolder.maxNum = "'${COUNTER}'"' >> "${VMDIR}/boot2docker.vmx"
+    echo 'isolation.tools.hgfs.disable = "FALSE"' >> "${VMDIR}/boot2docker.vmx"
 }
 
 function docker-destroy-vm () {
@@ -155,7 +171,7 @@ function docker-destroy-vm () {
 function docker-vmrun () {
     local VM_CMD=$1
     shift
-    "$(cygpath -u "$VMRUN_BIN")" -T ws "${VM_CMD}" "$(cygpath -w "$VMPATH")" "$@" | tr -d '\r'
+    "$(cygpath -u "$VMRUN_BIN")" -T ws -gu docker -gp tcuser "${VM_CMD}" "$(cygpath -w "$VMPATH")" "$@" | tr -d '\r'
 }
 
 function docker-ip () {
