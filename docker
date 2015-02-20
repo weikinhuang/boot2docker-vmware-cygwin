@@ -179,7 +179,9 @@ FWD_SERVER_JS=$(
 cat << EOF
 var child_process = require("child_process"),
     activeTunnel = null,
-    activePorts = [];
+    activePorts = [],
+    dockerPort = 2375,
+    dockerSslPort = 2376;
 function killActiveTunnel() {
     if (activeTunnel) {
         activeTunnel.kill("SIGINT");
@@ -196,6 +198,8 @@ function updatePorts() {
             return;
         }
         var ports = [];
+        ports.push(dockerPort);
+        ports.push(dockerSslPort);
         stdout.replace(/\d+\/\w+ -> \d+.\d+.\d+.\d+:(\d+)/g, function(m, p) {
             ports.push(+p);
         });
@@ -453,6 +457,12 @@ sudo reboot
 
 DOCKER_INIT
     sleep 60
+
+    echo -e "\033[0;32mPulling ssl certs\033[0m\033[0;34m"
+    mkdir ~/.docker &>/dev/null
+    docker-get '~/.docker/*' ~/.docker/
+    echo -e "\033[0m"
+
     echo -e "\033[0;32mReady\033[0m"
 }
 
@@ -469,35 +479,8 @@ case "$SHELL_DOCKER_ACTION" in
     ssh-batch)
         docker-ssh-batch-mode "$@"
     ;;
-    cifs)
-        docker-mount-cifs "$@"
-    ;;
-    fwd)
-        SHELL_DOCKER_SUBACTION="$1"
-        shift
-        case "$SHELL_DOCKER_SUBACTION" in
-            pid)
-                docker-forward-pid
-            ;;
-            ports)
-                docker-forward-ports
-            ;;
-            published)
-                docker-ssh 'for x in $(docker ps -q); do docker port $x; done'
-            ;;
-            reload)
-                docker-refresh-port-forwards
-            ;;
-            start)
-                docker-start-port-forward-manager
-            ;;
-            stop)
-                docker-forward-kill
-            ;;
-            *)
-                exit 1
-            ;;
-        esac
+    curl)
+        curl --insecure --cert ~/.docker/cert.pem --key ~/.docker/key.pem "$@"
     ;;
     get)
         docker-get "$@"
@@ -516,17 +499,59 @@ case "$SHELL_DOCKER_ACTION" in
                 sleep 120
                 docker-vm-init
             ;;
+            cifs)
+                docker-mount-cifs "$@"
+            ;;
+            clean)
+                echo -ne "\033[0;32m"
+                echo "Cleaning ALL up docker images"
+                echo -ne "\033[0m\033[0;34m"
+                docker-ssh docker rm $(docker-ssh docker ps -a -q)
+                docker-ssh docker rmi $(docker-ssh docker images | grep "^<none>" | awk "{print $3}")
+                echo -ne "\033[0m\033[0;32m"
+                echo "Shrinking disk"
+                echo -ne "\033[0m\033[0;34m"
+                docker-ssh sudo vmware-toolbox-cmd disk shrink /mnt/sda1
+                echo -ne "\033[0m"
+            ;;
             create)
-                echo -e "\033[0;34m"
+                echo -ne "\033[0;34m"
                 docker-create-vm
                 docker-download-iso
-                echo -e "\033[0m"
+                echo -ne "\033[0m"
             ;;
             destroy)
                 docker-destroy-vm
             ;;
             download)
                 docker-download-iso
+            ;;
+            fwd)
+                SHELL_DOCKER_FWD_SUBACTION="$1"
+                shift
+                case "$SHELL_DOCKER_FWD_SUBACTION" in
+                    pid)
+                        docker-forward-pid
+                    ;;
+                    ports)
+                        docker-forward-ports
+                    ;;
+                    published)
+                        docker-ssh 'for x in $(docker ps -q); do docker port $x; done'
+                    ;;
+                    reload)
+                        docker-refresh-port-forwards
+                    ;;
+                    start)
+                        docker-start-port-forward-manager
+                    ;;
+                    stop)
+                        docker-forward-kill
+                    ;;
+                    *)
+                        exit 1
+                    ;;
+                esac
             ;;
             init)
                 docker-vm-init
@@ -549,11 +574,6 @@ case "$SHELL_DOCKER_ACTION" in
             ;;
         esac
     ;;
-    clean)
-        echo "Cleaning ALL up docker images"
-        docker-ssh docker rm '$(docker ps -a | grep Exited | awk "{ print $1 }")'
-        docker-ssh docker rmi '$(docker images -aq)'
-    ;;
     ip)
         docker-ip
     ;;
@@ -573,16 +593,8 @@ case "$SHELL_DOCKER_ACTION" in
             echo
             echo 'Additional options for windows docker script:'
             echo
-            echo '    cifs      Mount a local share on the boot2docker vm'
-            echo '    clean     Remove all docker images and containers'
+            echo '    curl      Make a curl request against the docker api, use https://localhost:2376/'
             echo '    down      Stop the boot2docker vm'
-            echo '    fwd       Forwarding server, subactions:'
-            echo '    ├ pid         Get the port forwarding managing server pid'
-            echo '    ├ ports       List active ports forwarded to the host'
-            echo '    ├ published   List published ports from all containers'
-            echo '    ├ reload      Notify the port forwarding managing server of port changes'
-            echo '    ├ start       Start the port forwarding managing server'
-            echo '    └ stop        Stop port forwarding managing server'
             echo '    get       Get a file from the boot2docker vm'
             echo '    ip        Get the ip of the boot2docker vm'
             echo '    put       Send a file to the boot2docker vm'
@@ -590,10 +602,20 @@ case "$SHELL_DOCKER_ACTION" in
             echo '    up        Start the boot2docker vm'
             echo '    vm        Execute actions against the virtual machine, subactions:'
             echo '    ├ build       Create and initialize the boot2docker vm'
+            echo '    ├ cifs        Mount a local share on the boot2docker vm'
+            echo '    ├ clean       Remove unused docker images and containers'
             echo '    ├ create      Create the boot2docker vm'
             echo '    ├ destroy     Destroy the boot2docker vm'
             echo '    ├ download    Download the latest boot2docker.iso'
+            echo '    ├ fwd         Forwarding server, subactions:'
+            echo '    │ ├ pid           Get the port forwarding managing server pid'
+            echo '    │ ├ ports         List active ports forwarded to the host'
+            echo '    │ ├ published     List published ports from all containers'
+            echo '    │ ├ reload        Notify the port forwarding managing server of port changes'
+            echo '    │ ├ start         Start the port forwarding managing server'
+            echo '    │ └ stop          Stop port forwarding managing server'
             echo '    ├ init        Initialize the boot2docker vm'
+            echo '    ├ mount       Mount all administrative shares'
             echo '    ├ reboot      Reboot the boot2docker vm'
             echo '    └ run         Run a vmware command against boot2docker vm'
         fi

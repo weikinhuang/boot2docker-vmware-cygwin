@@ -2,7 +2,9 @@
 
 var child_process = require("child_process"),
     activeTunnel = null,
-    activePorts = [];
+    activePorts = [],
+    dockerPort = 2375,
+    dockerSslPort = 2376;
 function killActiveTunnel() {
     if (activeTunnel) {
         activeTunnel.kill("SIGINT");
@@ -19,6 +21,8 @@ function updatePorts() {
             return;
         }
         var ports = [];
+        ports.push(dockerPort);
+        ports.push(dockerSslPort);
         stdout.replace(/\d+\/\w+ -> \d+.\d+.\d+.\d+:(\d+)/g, function(m, p) {
             ports.push(+p);
         });

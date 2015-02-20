@@ -885,20 +885,23 @@ _docker_wait() {
 	__docker_containers_all
 }
 
-_docker_cifs() {
-    if [[ $COMP_CWORD == 2 ]]; then
-        COMPREPLY=( $( compgen -W "$(net share | tr -d '\r' | tail -n+5 | head -n -2 | cut -d' ' -f1)" -- "$cur" ) )
-    elif [[ $COMP_CWORD == 3 ]]; then
-        _docker_scp_remote_files -d
-    fi
-}
-
-_docker_fwd() {
-    COMPREPLY=( $( compgen -W "pid ports published reload start stop" -- "$cur" ) )
-}
-
 _docker_vm() {
-    COMPREPLY=( $( compgen -W "build create destroy download init mount reboot run" -- "$cur" ) )
+    case "${COMP_WORDS[2]}" in
+        cifs)
+            if [[ $COMP_CWORD == 3 ]]; then
+                COMPREPLY=( $( compgen -W "$(net share | tr -d '\r' | tail -n+5 | head -n -2 | cut -d' ' -f1)" -- "$cur" ) )
+            elif [[ $COMP_CWORD == 4 ]]; then
+                _docker_scp_remote_files -d
+            fi
+            return
+        ;;
+        fwd)
+            COMPREPLY=( $( compgen -W "pid ports published reload start stop" -- "$cur" ) )
+            return
+        ;;
+    esac
+
+    COMPREPLY=( $( compgen -W "build cifs clean create destroy download fwd init mount reboot run" -- "$cur" ) )
 }
 
 _docker_get() {
@@ -1026,10 +1029,8 @@ _docker() {
 		version
 		wait
 
-		cifs
-		clean
+		curl
 		down
-		fwd
 		get
 		ip
 		put
