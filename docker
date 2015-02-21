@@ -2,7 +2,7 @@
 
 SCRIPT="$0"
 
-SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o ConnectTimeout=5 -k"
+SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o ConnectTimeout=5"
 VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
 VMPATH='D:\Documents and Settings\My Documents\Virtual Machines\boot2docker\boot2docker.vmx'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
@@ -196,7 +196,6 @@ cat << EOF
 var child_process = require("child_process"),
     activeTunnel = null,
     activePorts = [],
-    dockerPort = 2375,
     dockerSslPort = 2376;
 function killActiveTunnel() {
     if (activeTunnel) {
@@ -206,7 +205,7 @@ function killActiveTunnel() {
     }
 }
 function updatePorts() {
-    child_process.exec("bash docker fwd published", function(err, stdout, stderr) {
+    child_process.exec("bash docker vm fwd published", function(err, stdout, stderr) {
         if (stderr) {
             process.stderr.write(stderr);
         }
@@ -214,7 +213,6 @@ function updatePorts() {
             return;
         }
         var ports = [];
-        ports.push(dockerPort);
         ports.push(dockerSslPort);
         stdout.replace(/\d+\/\w+ -> \d+.\d+.\d+.\d+:(\d+)/g, function(m, p) {
             ports.push(+p);
@@ -225,7 +223,6 @@ function updatePorts() {
         killActiveTunnel();
         var args = [
             "-N",
-            "-k",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "StrictHostKeyChecking=no",
             "-o", "ConnectTimeout=2"

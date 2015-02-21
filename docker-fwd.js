@@ -3,7 +3,6 @@
 var child_process = require("child_process"),
     activeTunnel = null,
     activePorts = [],
-    dockerPort = 2375,
     dockerSslPort = 2376;
 function killActiveTunnel() {
     if (activeTunnel) {
@@ -13,7 +12,7 @@ function killActiveTunnel() {
     }
 }
 function updatePorts() {
-    child_process.exec("bash docker forwarded-ports", function(err, stdout, stderr) {
+    child_process.exec("bash docker vm fwd published", function(err, stdout, stderr) {
         if (stderr) {
             process.stderr.write(stderr);
         }
@@ -21,7 +20,6 @@ function updatePorts() {
             return;
         }
         var ports = [];
-        ports.push(dockerPort);
         ports.push(dockerSslPort);
         stdout.replace(/\d+\/\w+ -> \d+.\d+.\d+.\d+:(\d+)/g, function(m, p) {
             ports.push(+p);
@@ -38,9 +36,9 @@ function updatePorts() {
             "-o", "ConnectTimeout=2"
         ];
         ports.forEach(function(p) {
-            args.push("-L", p + ":" + process.env.BOOT2DOCKER_HOST + ":" + p);
+            args.push("-L", p + ":" + process.env.DOCKER_HOST + ":" + p);
         });
-        args.push("docker@" + process.env.BOOT2DOCKER_HOST);
+        args.push("docker@" + process.env.DOCKER_HOST);
         activeTunnel = child_process.spawn("ssh", args);
         activePorts = ports;
     });
@@ -76,4 +74,4 @@ require("http")
         }
         response.end("");
     })
-    .listen(process.env.FORWARDS_SERVER_PORT, "localhost");
+    .listen(process.env.FORWARDS_SERVER_PORT || 59145, "localhost");
