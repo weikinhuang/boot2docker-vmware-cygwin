@@ -901,7 +901,7 @@ _docker_vm() {
         ;;
     esac
 
-    COMPREPLY=( $( compgen -W "build cifs clean create destroy download fwd init mount reboot run" -- "$cur" ) )
+    COMPREPLY=( $( compgen -W "build cifs clean create destroy download fwd init mount poweroff reboot run" -- "$cur" ) )
 }
 
 _docker_get() {

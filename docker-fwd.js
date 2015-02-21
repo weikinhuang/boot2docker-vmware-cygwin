@@ -32,6 +32,7 @@ function updatePorts() {
         killActiveTunnel();
         var args = [
             "-N",
+            "-k",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "StrictHostKeyChecking=no",
             "-o", "ConnectTimeout=2"

@@ -2,12 +2,11 @@
 
 SCRIPT="$0"
 
-SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o ConnectTimeout=5"
+SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o ConnectTimeout=5 -k"
 VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
-NODE_BIN="$(cygpath 'C:\Program Files\nodejs\node.exe')"
 VMPATH='D:\Documents and Settings\My Documents\Virtual Machines\boot2docker\boot2docker.vmx'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
-export FORWARDS_SERVER_PORT=59145
+FORWARDS_SERVER_PORT=59145
 DOCKER_USER_PASSWD=tcuser
 
 function docker-host () {
@@ -226,6 +225,7 @@ function updatePorts() {
         killActiveTunnel();
         var args = [
             "-N",
+            "-k",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "StrictHostKeyChecking=no",
             "-o", "ConnectTimeout=2"
@@ -273,7 +273,7 @@ require("http")
 EOF
 )
     docker-forward-kill
-    DOCKER_HOST="$(docker-host)" "$NODE_BIN" -e "$FWD_SERVER_JS" &
+    DOCKER_HOST="$(docker-host)" FORWARDS_SERVER_PORT="$FORWARDS_SERVER_PORT" node -e "$FWD_SERVER_JS" &
 }
 
 function docker-boot2docker-iso-url () {
@@ -300,7 +300,7 @@ require("https").get({
 });
 EOF
 )"
-    #local LATEST_BOOT2DOCKER_TAG="$("$NODE_BIN" -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
+    #local LATEST_BOOT2DOCKER_TAG="$(node -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
     local LATEST_BOOT2DOCKER_TAG="v1.5.0"
     if [[ -n "$LATEST_BOOT2DOCKER_TAG" ]] && [[ "$LATEST_BOOT2DOCKER_TAG" != "v0.0.0" ]]; then
         echo "https://github.com/boot2docker/boot2docker/releases/download/${LATEST_BOOT2DOCKER_TAG}/boot2docker.iso"
@@ -602,6 +602,10 @@ case "$SHELL_DOCKER_ACTION" in
             mount)
                 docker-mount-all-admin-shares
             ;;
+            poweroff)
+                docker-forward-kill
+                docker-vmrun stop hard
+            ;;
             reboot)
                 docker-forward-kill
                 docker-reboot
@@ -659,6 +663,7 @@ case "$SHELL_DOCKER_ACTION" in
             echo '    │ └ stop          Stop port forwarding managing server'
             echo '    ├ init        Initialize the boot2docker vm'
             echo '    ├ mount       Mount all administrative shares'
+            echo '    ├ poweroff    Power off the boot2docker vm'
             echo '    ├ reboot      Reboot the boot2docker vm'
             echo '    └ run         Run a vmware command against boot2docker vm'
         fi
