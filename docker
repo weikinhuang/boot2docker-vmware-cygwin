@@ -61,53 +61,6 @@ sudo mount -tcifs "-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iochar
 DOCKER_MOUNT_SHARE
 }
 
-docker-ls-admin-shares () {
-    net share | tr -d '\r' | grep 'Default share' | cut -d ' ' -f1 | tr '[:upper:]' '[:lower:]'
-}
-
-docker-mount-all-admin-shares () {
-    # only mount when cifs is installed
-    if ! docker-ssh 'type mount.cifs &>/dev/null'; then
-        return 1
-    fi
-
-    for share in $(docker-ls-admin-shares | tr '\n' ' '); do
-        docker-mount-cifs "$share"
-    done
-}
-
-# list things that should have been shared...
-function docker-vm-list-shares () {
-    local vm_shares="$(cat "$(cygpath "$VMPATH")" | grep sharedFolder | grep 'hostPath\|guestName' | tr -d '\r')"
-    local vm_shares_idx="$(echo "${vm_shares}" | cut -d'.' -f1 | sort | uniq)"
-    local idx
-    local fol mnt
-
-    local IFS=$'\n'
-    for idx in "${vm_shares_idx}"; do
-        fol="$(cygpath -u "$(echo "${vm_shares}" | grep "^${idx}.hostPath" | sed 's#^'${idx}'.hostPath = "\(.\+\)"$#\1#')")"
-        mnt="/mnt/hgfs/$(echo "${vm_shares}" | grep "^${idx}.guestName" | sed 's#^'${idx}'.guestName = "\(.\+\)"$#\1#')"
-        echo "${fol}:${mnt}"
-    done
-    unset IFS
-}
-
-function docker-get-mapped-share-name () {
-    local cwd="$(realpath "$1")"
-    local IFS=$'\n'
-    local map dir
-    # see if we're in a mapped path
-    for map in "$(docker-vm-list-shares)"; do
-        dir="$(echo "${map}" | cut -d':' -f1)"
-        if [[ "${cwd}" =~ ^"${dir}" ]]; then
-            echo "$(echo "${map}" | cut -d':' -f2)/$(echo "$cwd" | sed "s!^${dir}/!!")"
-            return 0
-        fi
-    done
-    unset IFS
-    return 1
-}
-
 function docker-refresh-port-forwards () {
     curl -q -m 3 localhost:${DOCKER_TLS_PORT}/fwd/refresh &>/dev/null
 }
@@ -411,7 +364,7 @@ if ! blkid -c /dev/null | grep boot2docker-data &>/dev/null; then
     echo -ne "\033[0m"
 fi
 
-TCL_REPO_BASE=http://tinycorelinux.net/5.x/x86
+TCL_REPO_BASE=http://tinycorelinux.net/6.x/x86_64
 WORKING_DIR="\$(pwd)"
 BUILD_DIR="/tczbuild"
 sudo mkdir "\$BUILD_DIR"
@@ -452,46 +405,16 @@ echo -ne "\033[0;34m"
 sudo mkdir -p /mnt/sda1/var/lib/boot2docker/tcz
 
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/cifs-utils.tcz \$TCL_REPO_BASE/tcz/cifs-utils.tcz
-sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-common.tcz \$TCL_REPO_BASE/tcz/ncurses-common.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-terminfo.tcz \$TCL_REPO_BASE/tcz/ncurses-terminfo.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-utils.tcz \$TCL_REPO_BASE/tcz/ncurses-utils.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses.tcz \$TCL_REPO_BASE/tcz/ncurses.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/htop.tcz \$TCL_REPO_BASE/tcz/htop.tcz
 
 # this is for building images later
-sudo wget -O \$BUILD_DIR/squashfs-tools-4.x.tcz \$TCL_REPO_BASE/tcz/squashfs-tools-4.x.tcz
-tce-load -i \$BUILD_DIR/squashfs-tools-4.x.tcz
+sudo wget -O \$BUILD_DIR/squashfs-tools.tcz \$TCL_REPO_BASE/tcz/squashfs-tools.tcz
+tce-load -i \$BUILD_DIR/squashfs-tools.tcz
 
 echo -ne "\033[0m"
-
-if [[ ! -e /usr/local/bin/vmtoolsd ]]; then
-    echo -e "\033[0;32mDownloading open vmware tools\033[0m"
-
-    echo -ne "\033[0;34m"
-    sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/procps.tcz \$TCL_REPO_BASE/tcz/procps.tcz
-    sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/glib2.tcz \$TCL_REPO_BASE/tcz/glib2.tcz
-    sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/libtirpc.tcz \$TCL_REPO_BASE/tcz/libtirpc.tcz
-    sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/libffi.tcz \$TCL_REPO_BASE/tcz/libffi.tcz
-
-    sudo mkdir \$BUILD_DIR/libdnet
-    sudo mkdir \$BUILD_DIR/open-vm-tools
-    curl -L# https://github.com/vmware/tcl-container/releases/download/v9.4.6/libdnet.tgz | sudo tar -C \$BUILD_DIR/libdnet -xz
-    curl -L# https://github.com/vmware/tcl-container/releases/download/v9.4.6/open-vm-tools.tgz | sudo tar -C \$BUILD_DIR/open-vm-tools -xz
-    sudo mkdir -p \$BUILD_DIR/open-vm-tools/etc/vmware-tools/scripts/vmware
-    sudo mkdir -p \$BUILD_DIR/open-vm-tools/sbin
-    sudo mkdir -p \$BUILD_DIR/open-vm-tools/usr/local/bin
-    sudo curl -L# -o \$BUILD_DIR/open-vm-tools/etc/vmware-tools/scripts/vmware/network https://raw.githubusercontent.com/frapposelli/boot2docker/vmware-support/rootfs/rootfs/etc/vmware-tools/scripts/vmware/network
-    sudo curl -L# -o \$BUILD_DIR/open-vm-tools/usr/local/bin/lsb_release https://raw.githubusercontent.com/frapposelli/boot2docker/vmware-support/rootfs/rootfs/usr/local/bin/lsb_release
-
-    sudo chmod 755 \$BUILD_DIR/open-vm-tools/etc/vmware-tools/scripts/vmware/network
-    sudo chmod 755 \$BUILD_DIR/open-vm-tools/usr/local/bin/lsb_release
-
-    cd \$BUILD_DIR
-    sudo mksquashfs libdnet /mnt/sda1/var/lib/boot2docker/tcz/libdnet.tcz
-    sudo mksquashfs open-vm-tools /mnt/sda1/var/lib/boot2docker/tcz/open-vm-tools.tcz
-    cd "\$WORKING_DIR"
-    echo -ne "\033[0m"
-fi
 
 echo -e "\033[0;32mInstalling scripts to fix behaviors\033[0m"
 sudo mkdir -p \$BUILD_DIR/b2d-vm-fixes
@@ -527,10 +450,6 @@ sudo tee /mnt/sda1/var/lib/boot2docker/bootlocal.sh << BOOT2DOCKER_INIT_SCRIPT
 
 su - docker -c 'tce-load -i /var/lib/boot2docker/tcz/*.tcz'
 
-if [[ ! -e /etc/rc.d/vmtoolsd ]]; then
-    /usr/local/bin/vmtoolsd --background /var/run/vmtoolsd.pid
-fi
-
 echo > /var/lib/boot2docker/docker.log
 
 BOOT2DOCKER_INIT_SCRIPT
@@ -557,7 +476,7 @@ DOCKER_INIT
     echo -e "\033[0;32mPulling ssl certs\033[0m\033[0;34m"
     mkdir $HOME/.docker/ &>/dev/null
     docker-get '~/.docker/*' $HOME/.docker/
-    echo -e "\033[0m"
+    echo -ne "\033[0m"
 
     echo -e "\033[0;32mReady\033[0m"
 }
@@ -652,9 +571,6 @@ case "$SHELL_DOCKER_ACTION" in
             init)
                 docker-vm-init
             ;;
-            mount)
-                docker-mount-all-admin-shares
-            ;;
             poweroff)
                 docker-forward-kill
                 docker-vmrun stop hard
@@ -663,7 +579,6 @@ case "$SHELL_DOCKER_ACTION" in
                 docker-forward-kill
                 docker-reboot
                 sleep 20
-                docker-mount-all-admin-shares
                 docker-start-port-forward-manager
             ;;
             run)
@@ -680,7 +595,6 @@ case "$SHELL_DOCKER_ACTION" in
     up)
         docker-vmup
         sleep 20
-        docker-mount-all-admin-shares
         docker-start-port-forward-manager
     ;;
     down)
@@ -715,7 +629,6 @@ case "$SHELL_DOCKER_ACTION" in
             echo '    │ ├ start         Start the port forwarding managing server'
             echo '    │ └ stop          Stop port forwarding managing server'
             echo '    ├ init        Initialize the boot2docker vm'
-            echo '    ├ mount       Mount all administrative shares'
             echo '    ├ poweroff    Power off the boot2docker vm'
             echo '    ├ reboot      Reboot the boot2docker vm'
             echo '    └ run         Run a vmware command against boot2docker vm'
@@ -732,7 +645,7 @@ case "$SHELL_DOCKER_ACTION" in
                 # docker doesn't support -vPATH:PATH only -v PATH:PATH
                 # previous arg was a volume indicator
                 dir="$(echo "${arg}" | cut -d':' -f1)"
-                if [[ -e "$dir" && "$dir" != '/tmp' ]]; then
+                if [[ -e "$dir" && "$(realpath "${dir}")" =~ ^/[a-z]/ ]]; then
                     map="$(echo "${arg}" | cut -d':' -f2)"
                     res="/mnt/hgfs$(realpath "${dir}")"
                     if [[ -n "$map" && "$arg" =~ : ]]; then
