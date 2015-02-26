@@ -166,7 +166,7 @@ function killActiveTunnel() {
 	}
 }
 function getAllContainers(callback) {
-	https.request({
+	var req = https.request({
 		hostname : dockerHost,
 		port : dockerSslPort,
 		path : "/containers/json?all=1",
@@ -192,7 +192,22 @@ function getAllContainers(callback) {
 			}
 			callback(containers);
 		});
-	}).end();
+	});
+	req.on("error", function(err) {
+		switch (err.message) {
+			case "connect ETIMEDOUT":
+			case "connect ECONNREFUSED":
+				// try again in a few seconds
+				setTimeout(function() {
+					getAllContainers(callback);
+				}, 3000);
+				break;
+			default:
+				console.log(err);
+				break;
+		}
+	});
+	req.end();
 }
 function updatePorts() {
 	getAllContainers(function(containers) {
