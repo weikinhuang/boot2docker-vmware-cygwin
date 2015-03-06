@@ -538,7 +538,7 @@ case "$SHELL_DOCKER_ACTION" in
                 echo "Cleaning ALL up docker images"
                 echo -ne "\033[0m\033[0;34m"
                 docker-ssh docker rm $(docker-ssh docker ps -a -q)
-                docker-ssh docker rmi $(docker-ssh docker images | grep "^<none>" | awk "{print $3}")
+                docker-ssh docker rmi $(docker-ssh docker images | grep "^<none>" | awk '{print $3}')
                 echo -ne "\033[0m\033[0;32m"
                 echo "Shrinking disk"
                 echo -ne "\033[0m\033[0;34m"
