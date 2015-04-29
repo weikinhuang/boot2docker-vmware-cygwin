@@ -43,25 +43,6 @@ function docker-escape-args () {
     echo "${args[@]}"
 }
 
-# these 3 functions are because we don't have vmware shared folders yet
-# http://blog.tutum.co/2014/11/05/how-to-use-docker-on-windows/
-function docker-mount-cifs () {
-    local LOCAL_FOLDER="$1"
-    local LOCAL_FOLDER_CLEANNAME="$(echo "$LOCAL_FOLDER" | sed 's/\$$//')"
-    local REMOTE_FOLDER="${2-/mnt/hgfs/$LOCAL_FOLDER_CLEANNAME}"
-    local NAT_HOST="$(docker-host | sed 's/\.[0-9]\+$//').1"
-    if [[ -z "$CIFS_PASSWORD" ]]; then
-        echo -ne "\033[0;32mEnter CIFS share password: \033[0m"
-        read -s -p "" CIFS_PASSWORD
-        echo
-    fi
-    docker-ssh << DOCKER_MOUNT_SHARE
-sudo mkdir -p "${REMOTE_FOLDER}";
-sudo mount -tcifs "-ousername=${USER},password=${CIFS_PASSWORD},rw,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777" \
-    "//${NAT_HOST}/${LOCAL_FOLDER}" "${REMOTE_FOLDER}"
-DOCKER_MOUNT_SHARE
-}
-
 function docker-refresh-port-forwards () {
     curl -q -m 3 localhost:${DOCKER_TLS_PORT}/fwd/refresh &>/dev/null
 }
@@ -300,7 +281,8 @@ EOF
 
 function docker-boot2docker-iso-url () {
     # use custom version for vmware support for now
-    echo "https://github.com/weikinhuang/boot2docker-vmware-cygwin/releases/download/1.5.0-6vmdev/boot2docker.iso"
+    echo "https://github.com/SvenDowideit/boot2docker/releases/download/x64pr1/boot2docker.iso"
+    #echo "https://github.com/weikinhuang/boot2docker-vmware-cygwin/releases/download/1.5.0-6vmdev/boot2docker.iso"
     #echo "https://github.com/cloudnativeapps/boot2docker/releases/download/v1.5.0-vmw/boot2docker-1.5.0-vmw.iso"
     return 0
 
@@ -421,42 +403,12 @@ echo -e "\033[0;32mDownloading additional modules\033[0m"
 echo -ne "\033[0;34m"
 sudo mkdir -p /mnt/sda1/var/lib/boot2docker/tcz
 
-sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/cifs-utils.tcz \$TCL_REPO_BASE/tcz/cifs-utils.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-terminfo.tcz \$TCL_REPO_BASE/tcz/ncurses-terminfo.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-utils.tcz \$TCL_REPO_BASE/tcz/ncurses-utils.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses.tcz \$TCL_REPO_BASE/tcz/ncurses.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/htop.tcz \$TCL_REPO_BASE/tcz/htop.tcz
 
-# this is for building images later
-sudo wget -O \$BUILD_DIR/squashfs-tools.tcz \$TCL_REPO_BASE/tcz/squashfs-tools.tcz
-tce-load -i \$BUILD_DIR/squashfs-tools.tcz
-
 echo -ne "\033[0m"
-
-echo -e "\033[0;32mInstalling scripts to fix behaviors\033[0m"
-sudo mkdir -p \$BUILD_DIR/b2d-vm-fixes
-
-echo -ne "\033[0;32mFix resolv.conf issue\033[0m"
-
-echo -ne "\033[0;34m"
-sudo mkdir -p \$BUILD_DIR/b2d-vm-fixes/usr/share/udhcpc
-sudo curl -L# -o \$BUILD_DIR/b2d-vm-fixes/usr/share/udhcpc/default.script https://raw.githubusercontent.com/SvenDowideit/boot2docker/noclobber-resolve.conf/rootfs/rootfs/usr/share/udhcpc/default.script
-sudo chmod 755 \$BUILD_DIR/b2d-vm-fixes/usr/share/udhcpc/default.script
-echo -ne "\033[0m"
-
-if [[ ! -e /sbin/shutdown ]]; then
-    echo -ne "\033[0;34m"
-    echo -e "\033[0;32mAdd /sbin/shutdown for vmware\033[0m"
-    sudo mkdir -p \$BUILD_DIR/b2d-vm-fixes/sbin
-    sudo curl -L# -o \$BUILD_DIR/b2d-vm-fixes/sbin/shutdown https://raw.githubusercontent.com/frapposelli/boot2docker/vmware-support/rootfs/rootfs/sbin/shutdown
-    sudo chmod 755 \$BUILD_DIR/b2d-vm-fixes/sbin/shutdown
-    echo -ne "\033[0m"
-fi
-
-cd \$BUILD_DIR
-sudo mksquashfs b2d-vm-fixes /mnt/sda1/var/lib/boot2docker/tcz/b2d-vm-fixes.tcz
-cd "\$WORKING_DIR"
-echo -e "\033[0m"
 
 echo -e "\033[0;32mInstalling local boot script and profile\033[0m"
 
@@ -530,9 +482,6 @@ case "$SHELL_DOCKER_ACTION" in
                 docker-vmup
                 sleep 120
                 docker-vm-init
-            ;;
-            cifs)
-                docker-mount-cifs "$@"
             ;;
             clean)
                 echo -ne "\033[0;32m"
@@ -639,7 +588,6 @@ case "$SHELL_DOCKER_ACTION" in
             echo '    up        Start the boot2docker vm'
             echo '    vm        Execute actions against the virtual machine, subactions:'
             echo '    ├ build       Create and initialize the boot2docker vm'
-            echo '    ├ cifs        Mount a local share on the boot2docker vm'
             echo '    ├ clean       Remove unused docker images and containers'
             echo '    ├ create      Create the boot2docker vm'
             echo '    ├ destroy     Destroy the boot2docker vm'
