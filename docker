@@ -340,10 +340,13 @@ function docker-vm-init () {
     if docker-vmrun checkToolsState | grep running &>/dev/null; then
         # try to push ssh keys through vmware guest tools
         docker-vmrun runScriptInGuest /bin/sh "\
-            mkdir /home/docker/.ssh; \
-            chmod 700 /home/docker/.ssh; \
+            sudo chown docker -R /home/docker/.ssh; \
+            mkdir /home/docker/.ssh || true; \
+            chmod 700 /home/docker/.ssh || true; \
             chmod 600 /home/docker/.ssh/authorized_keys; \
-            cat /home/docker/.ssh/authorized_keys | grep \"${ID_RSA_PUB}\" || echo \"${ID_RSA_PUB}\" >> /home/docker/.ssh/authorized_keys"
+            cat /home/docker/.ssh/authorized_keys | grep \"${ID_RSA_PUB}\" || echo \"${ID_RSA_PUB}\" >> /home/docker/.ssh/authorized_keys; \
+            sudo chown docker -R /home/docker/.ssh; \
+            "
     else
         echo "Default password is '$DOCKER_USER_PASSWD'"
     fi
