@@ -155,7 +155,8 @@ function getAllContainers(callback) {
 		method : "GET",
 		cert : dockerTlsCert,
 		key : dockerTlsKey,
-		ca : dockerTlsCa
+		ca : dockerTlsCa,
+		rejectUnauthorized : false
 	}, function(res) {
 		var data = "";
 		if (res.statusCode !== 200) {
@@ -261,7 +262,8 @@ http.createServer(function(request, response) {
 		method : request.method,
 		cert : dockerTlsCert,
 		key : dockerTlsKey,
-		ca : dockerTlsCa
+		ca : dockerTlsCa,
+		rejectUnauthorized : false
 	}, function(res) {
 		res.pipe(response, {
 			end : true
@@ -276,7 +278,10 @@ http.createServer(function(request, response) {
 EOF
 )
     docker-forward-kill
-    DOCKER_HOST="$(docker-host)" DOCKER_CERT_PATH="$(cygpath -w $HOME/.docker)" DOCKER_TLS_PORT="$DOCKER_TLS_PORT" node -e "$FWD_SERVER_JS" &
+    DOCKER_HOST="$(docker-host)" \
+    DOCKER_CERT_PATH="$(cygpath -w $HOME/.docker)" \
+    DOCKER_TLS_PORT="$DOCKER_TLS_PORT" \
+        node -e "$FWD_SERVER_JS" &
 }
 
 function docker-boot2docker-iso-url () {
@@ -375,6 +380,7 @@ echo -e "\033[0;32mBuilding userdata.tar\033[0m"
 
 echo -ne "\033[0;34m"
 mkdir /home/docker/.ssh
+sudo chown docker -R /home/docker/.ssh
 chmod 700 /home/docker/.ssh
 touch /home/docker/.ssh/authorized_keys
 sudo touch /mnt/sda1/var/lib/boot2docker/.ash_history
@@ -436,6 +442,10 @@ EXTRA_ARGS="--insecure-registry localhost"
 BOOT2DOCKER_PROFILE_SCRIPT
 
 sudo chmod 755 /mnt/sda1/var/lib/boot2docker/profile
+
+# force regenerating the docker tls certs
+sudo rm -rf /home/docker/.docker
+sudo rm -rf /var/lib/boot2docker/tls
 
 echo -e "\033[0m"
 

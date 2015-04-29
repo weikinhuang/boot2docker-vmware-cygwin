@@ -27,7 +27,8 @@ function getAllContainers(callback) {
 		method : "GET",
 		cert : dockerTlsCert,
 		key : dockerTlsKey,
-		ca : dockerTlsCa
+		ca : dockerTlsCa,
+		rejectUnauthorized : false
 	}, function(res) {
 		var data = "";
 		if (res.statusCode !== 200) {
@@ -133,7 +134,8 @@ http.createServer(function(request, response) {
 		method : request.method,
 		cert : dockerTlsCert,
 		key : dockerTlsKey,
-		ca : dockerTlsCa
+		ca : dockerTlsCa,
+		rejectUnauthorized : false
 	}, function(res) {
 		res.pipe(response, {
 			end : true
