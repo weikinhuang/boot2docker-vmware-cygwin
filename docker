@@ -121,8 +121,20 @@ function docker-vmdown () {
     docker-vmrun stop
 }
 
+function docker-vm-is-on () {
+    "$(cygpath -u "$VMRUN_BIN")" list | tr -d '\r' | sed 's/\\/\//g' | grep "$(cygpath -w "$VMPATH" | sed 's/\\/\//g')" 2>&1 >/dev/null
+}
+
 function docker-reboot () {
     docker-ssh sudo reboot
+}
+
+function docker-startup () {
+    if ! docker-vm-is-on; then
+        docker-vmup
+        sleep 20
+        docker-start-port-forward-manager
+    fi
 }
 
 function docker-start-port-forward-manager () {
@@ -286,7 +298,7 @@ EOF
 
 function docker-boot2docker-iso-url () {
     # use custom version for vmware support for now
-    echo "https://github.com/SvenDowideit/boot2docker/releases/download/x64pr1/boot2docker.iso"
+    echo "https://github.com/SvenDowideit/boot2docker/releases/download/x64pr2/boot2docker.iso"
     #echo "https://github.com/weikinhuang/boot2docker-vmware-cygwin/releases/download/1.5.0-6vmdev/boot2docker.iso"
     #echo "https://github.com/cloudnativeapps/boot2docker/releases/download/v1.5.0-vmw/boot2docker-1.5.0-vmw.iso"
     return 0
@@ -619,6 +631,7 @@ case "$SHELL_DOCKER_ACTION" in
         fi
     ;;
     run)
+        docker-startup
         docker-refresh-port-forwards
         args=( )
         prev_arg=
@@ -652,15 +665,18 @@ case "$SHELL_DOCKER_ACTION" in
         docker-refresh-port-forwards
     ;;
     start|stop|kill)
+        docker-startup
         docker-refresh-port-forwards
         docker-ssh docker "$SHELL_DOCKER_ACTION" "$@"
         docker-refresh-port-forwards
     ;;
     build)
+        docker-startup
         # always try to change the working directory to $PWD
         docker-ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker build "$@"
     ;;
     *)
+        docker-startup
         # default run docker command on remote host
         docker-ssh docker "$SHELL_DOCKER_ACTION" $(docker-escape-args "$@")
     ;;
