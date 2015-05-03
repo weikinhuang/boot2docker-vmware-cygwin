@@ -259,7 +259,11 @@ http.createServer(function(request, response) {
 				break;
 			case "/fwd/refresh":
 			default:
+				// try updating multiple times
 				setTimeout(updatePorts, 3000);
+				setTimeout(updatePorts, 6000);
+				setTimeout(updatePorts, 9000);
+				setTimeout(updatePorts, 12000);
 				break;
 		}
 		response.end("");
