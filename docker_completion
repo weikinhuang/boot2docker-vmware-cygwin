@@ -887,21 +887,17 @@ _docker_wait() {
 
 _docker_vm() {
     case "${COMP_WORDS[2]}" in
-        cifs)
-            if [[ $COMP_CWORD == 3 ]]; then
-                COMPREPLY=( $( compgen -W "$(net share | tr -d '\r' | tail -n+5 | head -n -2 | cut -d' ' -f1)" -- "$cur" ) )
-            elif [[ $COMP_CWORD == 4 ]]; then
-                _docker_scp_remote_files -d
-            fi
-            return
-        ;;
         fwd)
             COMPREPLY=( $( compgen -W "pid ports published reload start stop" -- "$cur" ) )
             return
         ;;
+        clean)
+            COMPREPLY=( $( compgen -W "-a" -- "$cur" ) )
+            return
+        ;;
     esac
 
-    COMPREPLY=( $( compgen -W "build cifs clean create destroy download fwd init mount poweroff reboot run" -- "$cur" ) )
+    COMPREPLY=( $( compgen -W "build clean create destroy download fwd init mount poweroff reboot run" -- "$cur" ) )
 }
 
 _docker_get() {

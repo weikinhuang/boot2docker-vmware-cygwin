@@ -96,6 +96,11 @@ function docker-create-vm () {
     done
     echo 'sharedFolder.maxNum = "'${COUNTER}'"' >> "${VMDIR}/boot2docker.vmx"
     echo 'isolation.tools.hgfs.disable = "FALSE"' >> "${VMDIR}/boot2docker.vmx"
+
+    # fix cygwin permissions...
+    setfacl -b "${VMDIR}"
+    chmod -R 755 "${VMDIR}"
+    sleep 2
 }
 
 function docker-destroy-vm () {
@@ -516,7 +521,9 @@ case "$SHELL_DOCKER_ACTION" in
                 echo -ne "\033[0;32m"
                 echo "Cleaning ALL up docker images"
                 echo -ne "\033[0m\033[0;34m"
-                docker-ssh docker rm $(docker-ssh docker ps -a -q)
+                if [[ $1 == "-a" ]]; then
+                    docker-ssh docker rm $(docker-ssh docker ps -a -q)
+                fi
                 docker-ssh docker rmi $(docker-ssh docker images | grep "^<none>" | awk '{print $3}')
                 echo -ne "\033[0m\033[0;32m"
                 echo "Shrinking disk"
@@ -617,7 +624,7 @@ case "$SHELL_DOCKER_ACTION" in
             echo '    up        Start the boot2docker vm'
             echo '    vm        Execute actions against the virtual machine, subactions:'
             echo '    ├ build       Create and initialize the boot2docker vm'
-            echo '    ├ clean       Remove unused docker images and containers'
+            echo '    ├ clean       Remove unused docker images and containers. Use -a to remove stopped containers'
             echo '    ├ create      Create the boot2docker vm'
             echo '    ├ destroy     Destroy the boot2docker vm'
             echo '    ├ download    Download the latest boot2docker.iso'
