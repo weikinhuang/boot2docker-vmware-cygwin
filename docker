@@ -307,9 +307,7 @@ EOF
 
 function docker-boot2docker-iso-url () {
     # use custom version for vmware support for now
-    echo "https://github.com/SvenDowideit/boot2docker/releases/download/x64pr2/boot2docker.iso"
-    #echo "https://github.com/weikinhuang/boot2docker-vmware-cygwin/releases/download/1.5.0-6vmdev/boot2docker.iso"
-    #echo "https://github.com/cloudnativeapps/boot2docker/releases/download/v1.5.0-vmw/boot2docker-1.5.0-vmw.iso"
+    echo "https://github.com/SvenDowideit/boot2docker/releases/download/x64rc1/boot2docker.iso"
     return 0
 
 GET_LATEST_BOOT2DOCKER_TAG="$(
