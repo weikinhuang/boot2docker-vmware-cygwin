@@ -486,6 +486,19 @@ DOCKER_INIT
     echo -e "\033[0;32mReady\033[0m"
 }
 
+function docker-ps1 () {
+    local PS1_COLOR_RESET='\[\e[0m\]'
+    local PS1_COLOR_EXIT_ERROR='\[\e[38;5;196m\]'
+    local PS1_COLOR_USER='\[\e[38;5;197m\]'
+    local PS1_COLOR_HOST='\[\e[38;5;208m\]'
+    local PS1_COLOR_HOST_SCREEN='\[\e[4m\]\[\e[38;5;214m\]'
+    local PS1_COLOR_WORK_DIR='\[\e[38;5;142m\]'
+
+    local PS1_EXIT_STATUS='$(EXIT="$?"; [[ $EXIT -ne 0 ]] && echo -n "(E:${EXIT}) ")'
+
+    echo "[${PS1_COLOR_EXIT_ERROR}${PS1_EXIT_STATUS}${PS1_COLOR_RESET}${PS1_COLOR_USER}\u${PS1_COLOR_RESET}@${PS1_COLOR_HOST_SCREEN}docker${PS1_COLOR_RESET}.${PS1_COLOR_HOST}\h${PS1_COLOR_RESET} ${PS1_COLOR_WORK_DIR}\W${PS1_COLOR_RESET}]$(echo -e "\xE2\x99\xAB") "
+}
+
 # ======================================================================================================================
 # Start of commnds
 # ======================================================================================================================
@@ -656,6 +669,8 @@ case "$SHELL_DOCKER_ACTION" in
         args=("${args[@]}" "-e" "HISTSIZE=${HISTSIZE}")
         args=("${args[@]}" "-e" "HISTFILESIZE=${HISTFILESIZE}")
         args=("${args[@]}" "-e" "$(printf '%q' "PROMPT_COMMAND=history -a")")
+        args=("${args[@]}" "-e" "$(printf '%q' "PS1=$(docker-ps1)")")
+        args=("${args[@]}" "-e" "$(printf '%q' "PS2=$(echo -e "\xe2\x86\x92") ")")
         # This doesn't work for some reason
         # args=("${args[@]}" "-v" "$(printf '%q' "/mnt/hgfs$(realpath "$HOME")/.docker/docker_history:/root/.bash_history")")
         args=("${args[@]}" "-v" "/var/lib/boot2docker/.docker_history:/root/.bash_history")
