@@ -466,6 +466,10 @@ sudo chmod 755 /mnt/sda1/var/lib/boot2docker/profile
 sudo rm -rf /home/docker/.docker
 sudo rm -rf /var/lib/boot2docker/tls
 
+# create history file
+sudo touch /var/lib/boot2docker/.docker_history
+sudo chmod 666 /var/lib/boot2docker/.docker_history
+
 echo -e "\033[0m"
 
 echo -e "\033[0;32mRebooting\033[0m"
@@ -645,6 +649,18 @@ case "$SHELL_DOCKER_ACTION" in
         args=( )
         prev_arg=
 
+        # generate a persistient history file
+        args=("${args[@]}" "-e" "HISTFILE=/root/.bash_history")
+        args=("${args[@]}" "-e" "$(printf '%q' "HISTIGNORE=${HISTIGNORE}")")
+        args=("${args[@]}" "-e" "$(printf '%q' "HISTCONTROL=${HISTCONTROL}")")
+        args=("${args[@]}" "-e" "HISTSIZE=${HISTSIZE}")
+        args=("${args[@]}" "-e" "HISTFILESIZE=${HISTFILESIZE}")
+        args=("${args[@]}" "-e" "$(printf '%q' "PROMPT_COMMAND=history -a")")
+        # This doesn't work for some reason
+        # args=("${args[@]}" "-v" "$(printf '%q' "/mnt/hgfs$(realpath "$HOME")/.docker/docker_history:/root/.bash_history")")
+        args=("${args[@]}" "-v" "/var/lib/boot2docker/.docker_history:/root/.bash_history")
+
+        # process mounts
         for arg in "$@"; do
             # if argument is a file, then expand it to windows paths
             if [[ "$prev_arg" == '-v' ]]; then
