@@ -466,10 +466,6 @@ sudo chmod 755 /mnt/sda1/var/lib/boot2docker/profile
 sudo rm -rf /home/docker/.docker
 sudo rm -rf /var/lib/boot2docker/tls
 
-# create history file
-sudo touch /var/lib/boot2docker/.docker_history
-sudo chmod 666 /var/lib/boot2docker/.docker_history
-
 echo -e "\033[0m"
 
 echo -e "\033[0;32mRebooting\033[0m"
@@ -481,6 +477,7 @@ DOCKER_INIT
     echo -e "\033[0;32mPulling ssl certs\033[0m\033[0;34m"
     mkdir $HOME/.docker/ &>/dev/null
     docker-get '~/.docker/*' $HOME/.docker/
+    touch $HOME/.docker/.docker_history
     echo -ne "\033[0m"
 
     echo -e "\033[0;32mReady\033[0m"
@@ -671,9 +668,8 @@ case "$SHELL_DOCKER_ACTION" in
         args=("${args[@]}" "-e" "$(printf '%q' "PROMPT_COMMAND=history -a")")
         args=("${args[@]}" "-e" "$(printf '%q' "PS1=$(docker-ps1)")")
         args=("${args[@]}" "-e" "$(printf '%q' "PS2=$(echo -e "\xe2\x86\x92") ")")
-        # This doesn't work for some reason
-        # args=("${args[@]}" "-v" "$(printf '%q' "/mnt/hgfs$(realpath "$HOME")/.docker/docker_history:/root/.bash_history")")
-        args=("${args[@]}" "-v" "/var/lib/boot2docker/.docker_history:/root/.bash_history")
+        # args=("${args[@]}" "-v" "/var/lib/boot2docker/.docker_history:/root/.bash_history")
+        args=("${args[@]}" "-v" "$(printf '%q' "/mnt/hgfs$(realpath "$HOME")/.docker/.docker_history:/root/.bash_history")")
 
         # process mounts
         for arg in "$@"; do
