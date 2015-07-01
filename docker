@@ -72,9 +72,13 @@ function docker-put () {
 }
 
 function docker-create-vm () {
+    # allow differently sized vms
+    local VMDK_SIZE="${VMDK_SIZE-16G}"
+
     mkdir -p "${VMDIR}"
+
     curl -L# "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmx" > "${VMDIR}/boot2docker.vmx"
-    curl -L# "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.tar.gz" | tar -zxO > "${VMDIR}/boot2docker.vmdk"
+    curl -L# "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.${VMDK_SIZE}.tar.gz" | tar -zxO > "${VMDIR}/boot2docker.vmdk"
 
     # allow access to all cores
     local PROC_CORES=$(grep "^processor" -c /proc/cpuinfo)
