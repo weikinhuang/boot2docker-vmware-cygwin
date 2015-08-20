@@ -7,6 +7,7 @@ VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
 VMPATH="$(cygpath -w "$(realpath ~/Documents/Virtual\ Machines)")"'\boot2docker\boot2docker.vmx'
 VMDKPATH="$(cygpath -w "$(realpath ~/Documents/Virtual\ Machines)")"'\boot2docker\boot2docker.vmdk'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
+LATEST_BOOT2DOCKER_TAG="v1.8.1"
 DOCKER_TLS_PORT=2376
 DOCKER_USER_PASSWD=tcuser
 
@@ -310,36 +311,7 @@ EOF
 }
 
 function docker-boot2docker-iso-url () {
-    # use custom version for vmware support for now
-    echo "https://github.com/boot2docker/boot2docker/releases/download/v1.8.0/boot2docker.iso"
-    return 0
-
-GET_LATEST_BOOT2DOCKER_TAG="$(
-cat << EOF
-require("https").get({
-    host: "api.github.com",
-    path: "/repos/boot2docker/boot2docker/releases",
-    headers: {"user-agent": "boot2docker-latest"}
-}, function(response) {
-    var body = "";
-    response.on("data", function(d) { body += d; });
-    response.on("end", function() {
-        try {
-            console.log(JSON.parse(body).reduce(function(p, c) { return (!(/^v\d+\.\d+\.\d+/).test(c.name) || p > c.name) ? p : c.name; }, "v0.0.0"));
-        } catch (e) {
-            console.error(e.message);
-        }
-    });
-});
-EOF
-)"
-    #local LATEST_BOOT2DOCKER_TAG="$(node -e "${GET_LATEST_BOOT2DOCKER_TAG}")"
-    local LATEST_BOOT2DOCKER_TAG="v1.5.0"
-    if [[ -n "$LATEST_BOOT2DOCKER_TAG" ]] && [[ "$LATEST_BOOT2DOCKER_TAG" != "v0.0.0" ]]; then
-        echo "https://github.com/boot2docker/boot2docker/releases/download/${LATEST_BOOT2DOCKER_TAG}/boot2docker.iso"
-    else
-        exit 1
-    fi
+    echo "https://github.com/boot2docker/boot2docker/releases/download/${LATEST_BOOT2DOCKER_TAG}/boot2docker.iso"
 }
 
 function docker-download-iso () {
