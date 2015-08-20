@@ -8,6 +8,7 @@ VMPATH="$(cygpath -w "$(realpath ~/Documents/Virtual\ Machines)")"'\boot2docker\
 VMDKPATH="$(cygpath -w "$(realpath ~/Documents/Virtual\ Machines)")"'\boot2docker\boot2docker.vmdk'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
 LATEST_BOOT2DOCKER_TAG="v1.8.1"
+LATEST_DOCKER_COMPOSE_TAG="1.4.0"
 DOCKER_TLS_PORT=2376
 DOCKER_USER_PASSWD=tcuser
 
@@ -409,8 +410,9 @@ sudo mkdir -p /mnt/sda1/var/lib/boot2docker/tcz
 
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-terminfo.tcz \$TCL_REPO_BASE/tcz/ncurses-terminfo.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-utils.tcz \$TCL_REPO_BASE/tcz/ncurses-utils.tcz
-sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses.tcz \$TCL_REPO_BASE/tcz/ncurses.tcz
 sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/htop.tcz \$TCL_REPO_BASE/tcz/htop.tcz
+sudo wget -O /mnt/sda1/var/lib/boot2docker/docker-compose https://github.com/docker/compose/releases/download/${LATEST_DOCKER_COMPOSE_TAG}/docker-compose-Linux-x86_64
+sudo chmod +x /mnt/sda1/var/lib/boot2docker/docker-compose
 
 echo -ne "\033[0m"
 
@@ -422,6 +424,8 @@ sudo tee /mnt/sda1/var/lib/boot2docker/bootlocal.sh << BOOT2DOCKER_INIT_SCRIPT
 #!/bin/sh
 
 su - docker -c 'tce-load -i /var/lib/boot2docker/tcz/*.tcz'
+
+ln -sf /mnt/sda1/var/lib/boot2docker/docker-compose /usr/bin/docker-compose
 
 echo > /var/lib/boot2docker/docker.log
 
@@ -686,6 +690,11 @@ case "$SHELL_DOCKER_ACTION" in
         docker-startup
         # always try to change the working directory to $PWD
         docker-ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker build "$@"
+    ;;
+    compose)
+        docker-startup
+        # always try to change the working directory to $PWD
+        docker-ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker-compose "$@"
     ;;
     *)
         docker-startup
