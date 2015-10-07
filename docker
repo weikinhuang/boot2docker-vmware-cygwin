@@ -4,8 +4,9 @@ SCRIPT="$0"
 
 SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o ConnectTimeout=5"
 VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
-VMPATH="$(cygpath -w "$(realpath ~/Documents/Virtual\ Machines)")"'\boot2docker\boot2docker.vmx'
-VMDKPATH="$(cygpath -w "$(realpath ~/Documents/Virtual\ Machines)")"'\boot2docker\boot2docker.vmdk'
+VM_ROOT_DIR="${VM_ROOT_DIR-"$HOME/Documents/Virtual Machines"}"
+VMPATH="$(cygpath -w "$(realpath "${VM_ROOT_DIR}")")"'\boot2docker\boot2docker.vmx'
+VMDKPATH="$(cygpath -w "$(realpath "${VM_ROOT_DIR}")")"'\boot2docker\boot2docker.vmdk'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
 LATEST_BOOT2DOCKER_TAG="v1.8.2"
 LATEST_DOCKER_COMPOSE_TAG="1.4.0"
@@ -65,12 +66,6 @@ function docker-get () {
     local TARGET="$1"
     local DEST="${2-.}"
     scp -r ${SSH_OPTIONS} docker@$(docker-host):"$TARGET" "$DEST"
-}
-
-function docker-put () {
-    local TARGET="$1"
-    local DEST="${2-/home/docker/}"
-    scp -r ${SSH_OPTIONS} "$TARGET" docker@$(docker-host):"${DEST}"
 }
 
 function docker-create-vm () {
@@ -492,12 +487,6 @@ case "$SHELL_DOCKER_ACTION" in
     curl)
         curl --insecure --cert ~/.docker/cert.pem --key ~/.docker/key.pem "$@"
     ;;
-    get)
-        docker-get "$@"
-    ;;
-    put)
-        docker-put "$@"
-    ;;
     vm)
         SHELL_DOCKER_SUBACTION="$1"
         shift
@@ -609,9 +598,7 @@ case "$SHELL_DOCKER_ACTION" in
             echo
             echo '    curl      Make a curl request against the docker api, use https://localhost:2376/'
             echo '    down      Stop the boot2docker vm'
-            echo '    get       Get a file from the boot2docker vm'
             echo '    ip        Get the ip of the boot2docker vm'
-            echo '    put       Send a file to the boot2docker vm'
             echo '    ssh       SSH into docker server or run remote commands'
             echo '    up        Start the boot2docker vm'
             echo '    vm        Execute actions against the virtual machine, subactions:'
@@ -686,10 +673,10 @@ case "$SHELL_DOCKER_ACTION" in
         docker-ssh docker "$SHELL_DOCKER_ACTION" "$@"
         docker-refresh-port-forwards
     ;;
-    build)
+    build|cp)
         docker-startup
         # always try to change the working directory to $PWD
-        docker-ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker build "$@"
+        docker-ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker "$SHELL_DOCKER_ACTION" "$@"
     ;;
     compose)
         docker-startup
