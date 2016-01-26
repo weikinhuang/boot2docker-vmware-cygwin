@@ -645,7 +645,7 @@ case "$SHELL_DOCKER_ACTION" in
                 # docker doesn't support -vPATH:PATH only -v PATH:PATH
                 # previous arg was a volume indicator
                 dir="$(echo "${arg}" | cut -d':' -f1)"
-                if [[ -e "$dir" && "$(realpath "${dir}")" =~ ^/[a-z]/ ]]; then
+                if [[ -e "$dir" && "$(realpath "${dir}")" =~ ^/[a-z]/ && "$dir" != /tmp* ]]; then
                     map="$(echo "${arg}" | cut -d':' -f2)"
                     res="/mnt/hgfs$(realpath "${dir}")"
                     if [[ -n "$map" && "$arg" =~ : ]]; then
