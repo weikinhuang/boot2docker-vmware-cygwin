@@ -138,7 +138,7 @@ function docker-reboot () {
 function docker-startup () {
     if ! docker-vm-is-on; then
         docker-vmup
-        sleep 20
+        docker-vm-wait-for-tools
         docker-start-port-forward-manager
     fi
 }
@@ -327,13 +327,21 @@ function docker-download-iso () {
     fi
 }
 
+docker-vm-wait-for-tools () {
+    local COUNTER=0
+    while ( ! docker-vmrun checkToolsState 2>&1 | grep 'running\|installed' &>/dev/null ) && [[ $COUNTER -lt 20 ]]; do
+        sleep 15
+        COUNTER=$((COUNTER+1))
+    done
+}
+
 function docker-vm-init () {
     # http://odewahn.github.io/docker-jumpstart/boot2docker.html
     # http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
 
     local ID_RSA_PUB="$(cat ~/.ssh/id_rsa.pub)"
 
-    if docker-vmrun checkToolsState | grep running &>/dev/null; then
+    if docker-vmrun checkToolsState | grep 'running\|installed' &>/dev/null; then
         # try to push ssh keys through vmware guest tools
         docker-vmrun runScriptInGuest /bin/sh "\
             sudo chown docker -R /home/docker/.ssh; \
@@ -370,7 +378,7 @@ sudo mkdir "\$BUILD_DIR"
 echo -e "\033[0;32mBuilding userdata.tar\033[0m"
 
 echo -ne "\033[0;34m"
-mkdir /home/docker/.ssh
+mkdir -p /home/docker/.ssh
 sudo chown docker -R /home/docker/.ssh
 chmod 700 /home/docker/.ssh
 touch /home/docker/.ssh/authorized_keys
@@ -443,7 +451,8 @@ echo -e "\033[0;32mRebooting\033[0m"
 sudo reboot
 
 DOCKER_INIT
-    sleep 60
+    sleep 20
+    docker-vm-wait-for-tools
 
     echo -e "\033[0;32mPulling ssl certs\033[0m\033[0;34m"
     mkdir $HOME/.docker/ &>/dev/null
@@ -491,7 +500,7 @@ case "$SHELL_DOCKER_ACTION" in
                 docker-create-vm
                 docker-download-iso
                 docker-vmup
-                sleep 120
+                docker-vm-wait-for-tools
                 docker-vm-init
             ;;
             clean)
@@ -564,6 +573,7 @@ case "$SHELL_DOCKER_ACTION" in
                 docker-forward-kill
                 docker-reboot
                 sleep 20
+                docker-vm-wait-for-tools
                 docker-start-port-forward-manager
             ;;
             run)
@@ -579,7 +589,7 @@ case "$SHELL_DOCKER_ACTION" in
     ;;
     up)
         docker-vmup
-        sleep 20
+        docker-vm-wait-for-tools
         docker-start-port-forward-manager
     ;;
     down)
