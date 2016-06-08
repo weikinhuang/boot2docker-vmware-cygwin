@@ -8,7 +8,7 @@ VM_ROOT_DIR="${VM_ROOT_DIR-"$HOME/Documents/Virtual Machines"}"
 VMPATH="$(cygpath -w "$(realpath "${VM_ROOT_DIR}")")"'\boot2docker\boot2docker.vmx'
 VMDKPATH="$(cygpath -w "$(realpath "${VM_ROOT_DIR}")")"'\boot2docker\boot2docker.vmdk'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
-LATEST_BOOT2DOCKER_TAG="v1.11.1"
+LATEST_BOOT2DOCKER_TAG="v1.11.2"
 LATEST_DOCKER_COMPOSE_TAG="1.7.1"
 DOCKER_TLS_PORT=2376
 DOCKER_USER_PASSWD=tcuser
@@ -71,6 +71,7 @@ function docker-get () {
 function docker-create-vm () {
     # allow differently sized vms
     local VMDK_SIZE="${VMDK_SIZE-16G}"
+    local VMEM_SIZE="${VMEM_SIZE-2048}"
 
     mkdir -p "${VMDIR}"
 
@@ -81,6 +82,7 @@ function docker-create-vm () {
     local PROC_CORES=$(grep "^processor" -c /proc/cpuinfo)
     sed -i 's/numvcpus = "[0-9]"/numvcpus = "'${PROC_CORES}'"/' "${VMDIR}/boot2docker.vmx"
     sed -i 's/cpuid.coresPerSocket = "[0-9]"/cpuid.coresPerSocket = "'${PROC_CORES}'"/' "${VMDIR}/boot2docker.vmx"
+    sed -i 's/^memsize = "2048"/memsize = "'${VMEM_SIZE}'"/' "${VMDIR}/boot2docker.vmx"
 
     # set up shared folders
     local COUNTER drive
