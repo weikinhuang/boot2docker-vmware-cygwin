@@ -2,23 +2,23 @@
 
 DOCKER_TLS_PORT=2376
 
-function docker-refresh-port-forwards () {
+function _docker-refresh-port-forwards () {
     curl -q -m 3 localhost:${DOCKER_TLS_PORT}/fwd/refresh &>/dev/null
 }
 
-function docker-forward-kill () {
+function _docker-forward-kill () {
     curl -q -m 3 localhost:${DOCKER_TLS_PORT}/fwd/kill &>/dev/null
 }
 
-function docker-forward-pid () {
+function _docker-forward-pid () {
     curl -q -m 3 localhost:${DOCKER_TLS_PORT}/fwd/pid 2>/dev/null
 }
 
-function docker-forward-ports () {
+function _docker-forward-ports () {
     curl -q -m 3 localhost:${DOCKER_TLS_PORT}/fwd/ports 2>/dev/null
 }
 
-function docker-start-port-forward-manager () {
+function _docker-start-port-forward-manager () {
 FWD_SERVER_JS=$(
 cat << EOF
 var child_process = require("child_process"),
@@ -174,39 +174,35 @@ http.createServer(function(request, response) {
 
 EOF
 )
-    docker-forward-kill
-    DOCKER_HOST="$(docker-host)" \
-    DOCKER_CERT_PATH="$(cygpath -w $HOME/.docker)" \
+    _docker-forward-kill
+    DOCKER_HOST="$(docker ip)" \
+    DOCKER_CERT_PATH="$(cygpath -w "$(docker vm confdir)")" \
     DOCKER_TLS_PORT="$DOCKER_TLS_PORT" \
         node -e "$FWD_SERVER_JS" &
 }
 
-case "$1" in
-    fwd)
-        SHELL_DOCKER_FWD_SUBACTION="$1"
-        shift
-        case "$SHELL_DOCKER_FWD_SUBACTION" in
-            pid)
-                docker-forward-pid
-            ;;
-            ports)
-                docker-forward-ports
-            ;;
-            published)
-                docker-ssh 'for x in $(docker ps -q); do docker port $x; done'
-            ;;
-            reload)
-                docker-refresh-port-forwards
-            ;;
-            start)
-                docker-start-port-forward-manager
-            ;;
-            stop)
-                docker-forward-kill
-            ;;
-            *)
-                exit 1
-            ;;
-        esac
+SHELL_DOCKER_FWD_SUBACTION="$1"
+shift
+case "$SHELL_DOCKER_FWD_SUBACTION" in
+    pid)
+        _docker-forward-pid
+    ;;
+    ports)
+        _docker-forward-ports
+    ;;
+    published)
+        docker ssh 'for x in $(docker ps -q); do docker port $x; done'
+    ;;
+    reload)
+        _docker-refresh-port-forwards
+    ;;
+    start)
+        _docker-start-port-forward-manager
+    ;;
+    stop)
+        _docker-forward-kill
+    ;;
+    *)
+        exit 1
     ;;
 esac
