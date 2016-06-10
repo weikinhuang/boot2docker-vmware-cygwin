@@ -10,8 +10,14 @@ VMDKPATH="$(cygpath -w "$(realpath "${VM_ROOT_DIR}")")"'\boot2docker\boot2docker
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
 LATEST_BOOT2DOCKER_TAG="v1.11.2"
 LATEST_DOCKER_COMPOSE_TAG="1.7.1"
-DOCKER_TLS_PORT=2376
 DOCKER_USER_PASSWD=tcuser
+DOCKER_CONFIG_HOME="$HOME/.docker"
+
+# make the docker home workdir
+if [[ ! -d "$DOCKER_CONFIG_HOME" ]]; then
+    mkdir -p "$DOCKER_CONFIG_HOME" &>/dev/null
+    chmod 700 "$DOCKER_CONFIG_HOME"
+fi
 
 function docker-host () {
     if [[ -n "${DOCKER_HOST}" ]]; then
@@ -44,22 +50,6 @@ function docker-escape-args () {
         args=("${args[@]}" $(printf '%q' "$arg"))
     done
     echo "${args[@]}"
-}
-
-function docker-refresh-port-forwards () {
-    curl -q -m 3 localhost:${DOCKER_TLS_PORT}/fwd/refresh &>/dev/null
-}
-
-function docker-forward-kill () {
-    curl -q -m 3 localhost:${DOCKER_TLS_PORT}/fwd/kill &>/dev/null
-}
-
-function docker-forward-pid () {
-    curl -q -m 3 localhost:${DOCKER_TLS_PORT}/fwd/pid 2>/dev/null
-}
-
-function docker-forward-ports () {
-    curl -q -m 3 localhost:${DOCKER_TLS_PORT}/fwd/ports 2>/dev/null
 }
 
 function docker-get () {
@@ -141,171 +131,7 @@ function docker-startup () {
     if ! docker-vm-is-on; then
         docker-vmup
         docker-vm-wait-for-tools
-        docker-start-port-forward-manager
     fi
-}
-
-function docker-start-port-forward-manager () {
-FWD_SERVER_JS=$(
-cat << EOF
-var child_process = require("child_process"),
-	fs = require("fs"),
-	http = require("http"),
-	https = require("https"),
-	path = require("path"),
-	activeTunnel = null,
-	activePorts = [],
-	dockerHost = process.env.DOCKER_HOST,
-	dockerSslPort = process.env.DOCKER_TLS_PORT || 2376,
-	dockerTlsCa = fs.readFileSync(path.join(process.env.DOCKER_CERT_PATH, "ca.pem")),
-	dockerTlsCert = fs.readFileSync(path.join(process.env.DOCKER_CERT_PATH, "cert.pem")),
-	dockerTlsKey = fs.readFileSync(path.join(process.env.DOCKER_CERT_PATH, "key.pem"));
-function killActiveTunnel() {
-	if (activeTunnel) {
-		activeTunnel.kill("SIGINT");
-		activeTunnel = null;
-		activePorts = [];
-	}
-}
-function getAllContainers(callback) {
-	var req = https.request({
-		hostname : dockerHost,
-		port : dockerSslPort,
-		path : "/containers/json?all=1",
-		method : "GET",
-		cert : dockerTlsCert,
-		key : dockerTlsKey,
-		ca : dockerTlsCa,
-		rejectUnauthorized : false
-	}, function(res) {
-		var data = "";
-		if (res.statusCode !== 200) {
-			return;
-		}
-		res.on("data", function(d) {
-			data += d;
-		});
-		res.on("end", function() {
-			var containers;
-			try {
-				containers = JSON.parse(data);
-			} catch (e) {
-				process.stderr.write("Forward server error: " + e.message + "\n");
-				return;
-			}
-			callback(containers);
-		});
-	});
-	req.on("error", function(err) {
-		switch (err.message) {
-			case "connect ETIMEDOUT":
-			case "connect ECONNREFUSED":
-				// try again in a few seconds
-				setTimeout(function() {
-					getAllContainers(callback);
-				}, 3000);
-				break;
-			default:
-				console.log(err);
-				break;
-		}
-	});
-	req.end();
-}
-function updatePorts() {
-	getAllContainers(function(containers) {
-		var ports = [];
-		containers.forEach(function(container) {
-			(container.Ports || []).forEach(function(portgroup) {
-				if (portgroup.PublicPort) {
-					ports.push(portgroup.PublicPort);
-				}
-			});
-		});
-		if (activePorts.sort().join(",") === ports.sort().join(",")) {
-			return;
-		}
-		killActiveTunnel();
-		var args = [
-			"-N",
-			"-k",
-			"-o", "UserKnownHostsFile=/dev/null",
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "ConnectTimeout=2"
-		];
-		ports.forEach(function(p) {
-			args.push("-L", p + ":" + dockerHost + ":" + p);
-		});
-		args.push("docker@" + dockerHost);
-		activeTunnel = child_process.spawn("ssh", args);
-		activePorts = ports;
-	});
-}
-setTimeout(updatePorts, 3000);
-process.on("exit", killActiveTunnel);
-http.createServer(function(request, response) {
-	if ((/^\/fwd\//i).test(request.url)) {
-		switch (request.url) {
-			case "/fwd/ports":
-				response.write(activePorts.join("\n"));
-				break;
-			case "/fwd/child":
-				if (activeTunnel) {
-					response.write(activeTunnel.pid + "");
-				}
-				break;
-			case "/fwd/child/kill":
-				killActiveTunnel();
-				break;
-			case "/fwd/pid":
-				response.write(process.pid + "");
-				break;
-			case "/fwd/kill":
-				process.nextTick(function() {
-					process.exit(0);
-				});
-				break;
-			case "/fwd/refresh":
-			default:
-				// try updating multiple times
-				setTimeout(updatePorts, 3000);
-				setTimeout(updatePorts, 6000);
-				setTimeout(updatePorts, 9000);
-				setTimeout(updatePorts, 12000);
-				break;
-		}
-		response.end("");
-		return;
-	}
-
-	// pipe the request to the docker api in the b2d host
-	var proxy = https.request({
-		hostname : dockerHost,
-		port : dockerSslPort,
-		path : request.url,
-		method : request.method,
-		cert : dockerTlsCert,
-		key : dockerTlsKey,
-		ca : dockerTlsCa,
-		rejectUnauthorized : false
-	}, function(res) {
-		res.pipe(response, {
-			end : true
-		});
-	});
-	request.pipe(proxy, {
-		end : true
-	});
-})
-	.listen(dockerSslPort, "localhost");
-
-EOF
-)
-    docker-forward-kill
-    DOCKER_HOST="$(docker-host)" \
-    DOCKER_CERT_PATH="$(cygpath -w $HOME/.docker)" \
-    DOCKER_TLS_PORT="$DOCKER_TLS_PORT" \
-        node -e "$FWD_SERVER_JS" &
 }
 
 function docker-boot2docker-iso-url () {
@@ -457,12 +283,32 @@ DOCKER_INIT
     docker-vm-wait-for-tools
 
     echo -e "\033[0;32mPulling ssl certs\033[0m\033[0;34m"
-    mkdir $HOME/.docker/ &>/dev/null
-    docker-get '~/.docker/*' $HOME/.docker/
-    touch $HOME/.docker/.docker_history
+    docker-get '~/.docker/*' "${DOCKER_CONFIG_HOME}/"
+    touch "${DOCKER_CONFIG_HOME}/.docker_history"
     echo -ne "\033[0m"
 
     echo -e "\033[0;32mReady\033[0m"
+}
+
+function docker-vm-clean () {
+    echo -ne "\033[0;32m"
+    echo "Cleaning ALL up docker images"
+    echo -ne "\033[0m\033[0;34m"
+    if [[ $1 == "-a" ]]; then
+        docker-ssh docker rm $(docker-ssh docker ps -a -q)
+    fi
+    docker-ssh docker rmi $(docker-ssh docker images | grep "^<none>" | awk '{print $3}')
+    echo -ne "\033[0m\033[0;32m"
+    echo "Shrinking disk"
+    echo -ne "\033[0m\033[0;34m"
+    VMDK_SIZE_OLD=$(du -hs "$(cygpath -u "$VMDKPATH")" | awk '{print $1}')
+    docker-ssh sudo vmware-toolbox-cmd disk shrink /mnt/sda1
+    VMDK_SIZE_NEW=$(du -hs "$(cygpath -u "$VMDKPATH")" | awk '{print $1}')
+    echo -ne "\033[0m"
+    echo -e "\033[0;32mOld Size: \033[1;32m${VMDK_SIZE_OLD}\033[0m"
+    echo -ne "\033[0m"
+    echo -e "\033[0;32mNew Size: \033[1;32m${VMDK_SIZE_NEW}\033[0m"
+    echo -ne "\033[0m"
 }
 
 function docker-ps1 () {
@@ -492,7 +338,7 @@ case "$SHELL_DOCKER_ACTION" in
         docker-ssh-batch-mode "$@"
     ;;
     curl)
-        curl --insecure --cert ~/.docker/cert.pem --key ~/.docker/key.pem "$@"
+        curl --insecure --cert "${DOCKER_CONFIG_HOME}/cert.pem" --key "${DOCKER_CONFIG_HOME}/key.pem" "$@"
     ;;
     vm)
         SHELL_DOCKER_SUBACTION="$1"
@@ -506,24 +352,7 @@ case "$SHELL_DOCKER_ACTION" in
                 docker-vm-init
             ;;
             clean)
-                echo -ne "\033[0;32m"
-                echo "Cleaning ALL up docker images"
-                echo -ne "\033[0m\033[0;34m"
-                if [[ $1 == "-a" ]]; then
-                    docker-ssh docker rm $(docker-ssh docker ps -a -q)
-                fi
-                docker-ssh docker rmi $(docker-ssh docker images | grep "^<none>" | awk '{print $3}')
-                echo -ne "\033[0m\033[0;32m"
-                echo "Shrinking disk"
-                echo -ne "\033[0m\033[0;34m"
-                VMDK_SIZE_OLD=$(du -hs "$(cygpath -u "$VMDKPATH")" | awk '{print $1}')
-                docker-ssh sudo vmware-toolbox-cmd disk shrink /mnt/sda1
-                VMDK_SIZE_NEW=$(du -hs "$(cygpath -u "$VMDKPATH")" | awk '{print $1}')
-                echo -ne "\033[0m"
-                echo -e "\033[0;32mOld Size: \033[1;32m${VMDK_SIZE_OLD}\033[0m"
-                echo -ne "\033[0m"
-                echo -e "\033[0;32mNew Size: \033[1;32m${VMDK_SIZE_NEW}\033[0m"
-                echo -ne "\033[0m"
+                docker-vm-clean
             ;;
             create)
                 echo -ne "\033[0;34m"
@@ -537,46 +366,20 @@ case "$SHELL_DOCKER_ACTION" in
             download)
                 docker-download-iso
             ;;
-            fwd)
-                SHELL_DOCKER_FWD_SUBACTION="$1"
-                shift
-                case "$SHELL_DOCKER_FWD_SUBACTION" in
-                    pid)
-                        docker-forward-pid
-                    ;;
-                    ports)
-                        docker-forward-ports
-                    ;;
-                    published)
-                        docker-ssh 'for x in $(docker ps -q); do docker port $x; done'
-                    ;;
-                    reload)
-                        docker-refresh-port-forwards
-                    ;;
-                    start)
-                        docker-start-port-forward-manager
-                    ;;
-                    stop)
-                        docker-forward-kill
-                    ;;
-                    *)
-                        exit 1
-                    ;;
-                esac
-            ;;
             init)
                 docker-vm-init
             ;;
             poweroff)
-                docker-forward-kill
                 docker-vmrun stop hard
             ;;
             reboot)
-                docker-forward-kill
                 docker-reboot
                 sleep 20
                 docker-vm-wait-for-tools
-                docker-start-port-forward-manager
+            ;;
+            rebuild)
+                docker vm destroy
+                docker vm build
             ;;
             run)
                 docker-vmrun "$@"
@@ -592,10 +395,8 @@ case "$SHELL_DOCKER_ACTION" in
     up)
         docker-vmup
         docker-vm-wait-for-tools
-        docker-start-port-forward-manager
     ;;
     down)
-        docker-forward-kill
         docker-vmdown
     ;;
     help)
@@ -630,7 +431,6 @@ case "$SHELL_DOCKER_ACTION" in
     ;;
     run)
         docker-startup
-        docker-refresh-port-forwards
         args=( )
         prev_arg=
 
@@ -673,13 +473,10 @@ case "$SHELL_DOCKER_ACTION" in
         done
         # send the remapped volume paths
         docker-ssh docker "$SHELL_DOCKER_ACTION" "${args[@]}"
-        docker-refresh-port-forwards
     ;;
     start|stop|kill)
         docker-startup
-        docker-refresh-port-forwards
         docker-ssh docker "$SHELL_DOCKER_ACTION" "$@"
-        docker-refresh-port-forwards
     ;;
     build|cp)
         docker-startup
@@ -695,7 +492,13 @@ case "$SHELL_DOCKER_ACTION" in
     ;;
     *)
         docker-startup
-        # default run docker command on remote host
-        docker-ssh docker "$SHELL_DOCKER_ACTION" $(docker-escape-args "$@")
+
+        # run plugin architecture command instead
+        if type "docker-$SHELL_DOCKER_ACTION" &>/dev/null; then
+            "docker-$SHELL_DOCKER_ACTION" "$@"
+        else
+            # default run docker command on remote host
+            docker-ssh docker "$SHELL_DOCKER_ACTION" $(docker-escape-args "$@")
+        fi
     ;;
 esac
