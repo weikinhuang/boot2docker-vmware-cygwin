@@ -19,29 +19,29 @@ if [[ ! -d "$DOCKER_CONFIG_HOME" ]]; then
     chmod 700 "$DOCKER_CONFIG_HOME"
 fi
 
-function docker-host () {
+function _docker-host () {
     if [[ -n "${DOCKER_HOST}" ]]; then
         echo "${DOCKER_HOST}"
         return 0
     fi
-    echo $(docker-ip)
+    echo $(_docker-ip)
 }
 
-function docker-ssh () {
+function _docker-ssh () {
     if [[ ! -t 0 || ! -t 1 ]]; then
         # pipe mode
-        ssh ${SSH_OPTIONS} docker@$(docker-host) -- "$@"
+        ssh ${SSH_OPTIONS} docker@$(_docker-host) -- "$@"
     else
         # non pipe mode
-        ssh ${SSH_OPTIONS} -t docker@$(docker-host) -- "$@"
+        ssh ${SSH_OPTIONS} -t docker@$(_docker-host) -- "$@"
     fi
 }
 
-function docker-ssh-batch-mode () {
-    ssh ${SSH_OPTIONS} -o 'Batchmode yes' docker@$(docker-host) -- "$@"
+function _docker-ssh-batch-mode () {
+    ssh ${SSH_OPTIONS} -o 'Batchmode yes' docker@$(_docker-host) -- "$@"
 }
 
-function docker-escape-args () {
+function _docker-escape-args () {
     if [[ $# == 0 ]]; then
         return
     fi
@@ -52,13 +52,13 @@ function docker-escape-args () {
     echo "${args[@]}"
 }
 
-function docker-get () {
+function _docker-get () {
     local TARGET="$1"
     local DEST="${2-.}"
-    scp -r ${SSH_OPTIONS} docker@$(docker-host):"$TARGET" "$DEST"
+    scp -r ${SSH_OPTIONS} docker@$(_docker-host):"$TARGET" "$DEST"
 }
 
-function docker-create-vm () {
+function _docker-create-vm () {
     # allow differently sized vms
     local VMDK_SIZE="${VMDK_SIZE-16G}"
     local VMEM_SIZE="${VMEM_SIZE-2048}"
@@ -96,50 +96,50 @@ function docker-create-vm () {
     sleep 2
 }
 
-function docker-destroy-vm () {
-    docker-vmrun stop hard
+function _docker-destroy-vm () {
+    _docker-vmrun stop hard
     rm -rf "$VMDIR"
 }
 
-function docker-vmrun () {
+function _docker-vmrun () {
     local VM_CMD=$1
     shift
     "$(cygpath -u "$VMRUN_BIN")" -T ws -gu docker -gp "$DOCKER_USER_PASSWD" "${VM_CMD}" "$(cygpath -w "$VMPATH")" "$@" | tr -d '\r'
 }
 
-function docker-ip () {
-    docker-vmrun getGuestIPAddress -wait
+function _docker-ip () {
+    _docker-vmrun getGuestIPAddress -wait
 }
 
-function docker-vmup () {
-    docker-vmrun start nogui
+function _docker-vmup () {
+    _docker-vmrun start nogui
 }
 
-function docker-vmdown () {
-    docker-vmrun stop
+function _docker-vmdown () {
+    _docker-vmrun stop
 }
 
-function docker-vm-is-on () {
+function _docker-vm-is-on () {
     "$(cygpath -u "$VMRUN_BIN")" list | tr -d '\r' | sed 's/\\/\//g' | grep "$(cygpath -w "$VMPATH" | sed 's/\\/\//g')" 2>&1 >/dev/null
 }
 
-function docker-reboot () {
-    docker-ssh sudo reboot
+function _docker-reboot () {
+    _docker-ssh sudo reboot
 }
 
-function docker-startup () {
-    if ! docker-vm-is-on; then
-        docker-vmup
-        docker-vm-wait-for-tools
+function _docker-startup () {
+    if ! _docker-vm-is-on; then
+        _docker-vmup
+        _docker-vm-wait-for-tools
     fi
 }
 
-function docker-boot2docker-iso-url () {
+function _docker-boot2docker-iso-url () {
     echo "https://github.com/boot2docker/boot2docker/releases/download/${LATEST_BOOT2DOCKER_TAG}/boot2docker.iso"
 }
 
-function docker-download-iso () {
-    local ISO_URL="$(docker-boot2docker-iso-url)"
+function _docker-download-iso () {
+    local ISO_URL="$(_docker-boot2docker-iso-url)"
     if [[ -z "${ISO_URL}" ]]; then
         exit 1
     fi
@@ -155,23 +155,23 @@ function docker-download-iso () {
     fi
 }
 
-docker-vm-wait-for-tools () {
+_docker-vm-wait-for-tools () {
     local COUNTER=0
-    while ( ! docker-vmrun checkToolsState 2>&1 | grep 'running\|installed' &>/dev/null ) && [[ $COUNTER -lt 20 ]]; do
+    while ( ! _docker-vmrun checkToolsState 2>&1 | grep 'running\|installed' &>/dev/null ) && [[ $COUNTER -lt 20 ]]; do
         sleep 15
         COUNTER=$((COUNTER+1))
     done
 }
 
-function docker-vm-init () {
+function _docker-vm-init () {
     # http://odewahn.github.io/docker-jumpstart/boot2docker.html
     # http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
 
     local ID_RSA_PUB="$(cat ~/.ssh/id_rsa.pub)"
 
-    if docker-vmrun checkToolsState | grep 'running\|installed' &>/dev/null; then
+    if _docker-vmrun checkToolsState | grep 'running\|installed' &>/dev/null; then
         # try to push ssh keys through vmware guest tools
-        docker-vmrun runScriptInGuest /bin/sh "\
+        _docker-vmrun runScriptInGuest /bin/sh "\
             sudo chown docker -R /home/docker/.ssh; \
             mkdir /home/docker/.ssh || true; \
             chmod 700 /home/docker/.ssh || true; \
@@ -183,7 +183,7 @@ function docker-vm-init () {
         echo "Default password is '$DOCKER_USER_PASSWD'"
     fi
 
-docker-ssh << DOCKER_INIT
+_docker-ssh << DOCKER_INIT
 #!/bin/sh
 
 if ! blkid -c /dev/null | grep boot2docker-data &>/dev/null; then
@@ -280,29 +280,29 @@ sudo reboot
 
 DOCKER_INIT
     sleep 20
-    docker-vm-wait-for-tools
+    _docker-vm-wait-for-tools
 
     echo -e "\033[0;32mPulling ssl certs\033[0m\033[0;34m"
-    docker-get '~/.docker/*' "${DOCKER_CONFIG_HOME}/"
+    _docker-get '~/.docker/*' "${DOCKER_CONFIG_HOME}/"
     touch "${DOCKER_CONFIG_HOME}/.docker_history"
     echo -ne "\033[0m"
 
     echo -e "\033[0;32mReady\033[0m"
 }
 
-function docker-vm-clean () {
+function _docker-vm-clean () {
     echo -ne "\033[0;32m"
     echo "Cleaning ALL up docker images"
     echo -ne "\033[0m\033[0;34m"
     if [[ $1 == "-a" ]]; then
-        docker-ssh docker rm $(docker-ssh docker ps -a -q)
+        _docker-ssh docker rm $(_docker-ssh docker ps -a -q)
     fi
-    docker-ssh docker rmi $(docker-ssh docker images | grep "^<none>" | awk '{print $3}')
+    _docker-ssh docker rmi $(_docker-ssh docker images | grep "^<none>" | awk '{print $3}')
     echo -ne "\033[0m\033[0;32m"
     echo "Shrinking disk"
     echo -ne "\033[0m\033[0;34m"
     VMDK_SIZE_OLD=$(du -hs "$(cygpath -u "$VMDKPATH")" | awk '{print $1}')
-    docker-ssh sudo vmware-toolbox-cmd disk shrink /mnt/sda1
+    _docker-ssh sudo vmware-toolbox-cmd disk shrink /mnt/sda1
     VMDK_SIZE_NEW=$(du -hs "$(cygpath -u "$VMDKPATH")" | awk '{print $1}')
     echo -ne "\033[0m"
     echo -e "\033[0;32mOld Size: \033[1;32m${VMDK_SIZE_OLD}\033[0m"
@@ -311,7 +311,7 @@ function docker-vm-clean () {
     echo -ne "\033[0m"
 }
 
-function docker-ps1 () {
+function _docker-ps1 () {
     local PS1_COLOR_RESET='\[\e[0m\]'
     local PS1_COLOR_EXIT_ERROR='\[\e[38;5;196m\]'
     local PS1_COLOR_USER='\[\e[38;5;197m\]'
@@ -332,10 +332,10 @@ SHELL_DOCKER_ACTION="$1"
 shift
 case "$SHELL_DOCKER_ACTION" in
     ssh)
-        docker-ssh "$@"
+        _docker-ssh "$@"
     ;;
     ssh-batch)
-        docker-ssh-batch-mode "$@"
+        _docker-ssh-batch-mode "$@"
     ;;
     curl)
         curl --insecure --cert "${DOCKER_CONFIG_HOME}/cert.pem" --key "${DOCKER_CONFIG_HOME}/key.pem" "$@"
@@ -345,44 +345,44 @@ case "$SHELL_DOCKER_ACTION" in
         shift
         case "$SHELL_DOCKER_SUBACTION" in
             build)
-                docker-create-vm
-                docker-download-iso
-                docker-vmup
-                docker-vm-wait-for-tools
-                docker-vm-init
+                _docker-create-vm
+                _docker-download-iso
+                _docker-vmup
+                _docker-vm-wait-for-tools
+                _docker-vm-init
             ;;
             clean)
-                docker-vm-clean
+                _docker-vm-clean
             ;;
             create)
                 echo -ne "\033[0;34m"
-                docker-create-vm
-                docker-download-iso
+                _docker-create-vm
+                _docker-download-iso
                 echo -ne "\033[0m"
             ;;
             destroy)
-                docker-destroy-vm
+                _docker-destroy-vm
             ;;
             download)
-                docker-download-iso
+                _docker-download-iso
             ;;
             init)
-                docker-vm-init
+                _docker-vm-init
             ;;
             poweroff)
-                docker-vmrun stop hard
+                _docker-vmrun stop hard
             ;;
             reboot)
-                docker-reboot
+                _docker-reboot
                 sleep 20
-                docker-vm-wait-for-tools
+                _docker-vm-wait-for-tools
             ;;
             rebuild)
                 docker vm destroy
                 docker vm build
             ;;
             run)
-                docker-vmrun "$@"
+                _docker-vmrun "$@"
             ;;
             *)
                 exit 1
@@ -390,17 +390,17 @@ case "$SHELL_DOCKER_ACTION" in
         esac
     ;;
     ip)
-        docker-ip
+        _docker-ip
     ;;
     up)
-        docker-vmup
-        docker-vm-wait-for-tools
+        _docker-vmup
+        _docker-vm-wait-for-tools
     ;;
     down)
-        docker-vmdown
+        _docker-vmdown
     ;;
     help)
-        docker-ssh docker help "$@"
+        _docker-ssh docker help "$@"
         if [[ $# == 0 ]]; then
             echo
             echo 'Additional options for windows docker script:'
@@ -430,7 +430,7 @@ case "$SHELL_DOCKER_ACTION" in
         fi
     ;;
     run)
-        docker-startup
+        _docker-startup
         args=( )
         prev_arg=
 
@@ -441,9 +441,8 @@ case "$SHELL_DOCKER_ACTION" in
         args=("${args[@]}" "-e" "HISTSIZE=${HISTSIZE}")
         args=("${args[@]}" "-e" "HISTFILESIZE=${HISTFILESIZE}")
         args=("${args[@]}" "-e" "$(printf '%q' "PROMPT_COMMAND=history -a")")
-        args=("${args[@]}" "-e" "$(printf '%q' "PS1=$(docker-ps1)")")
+        args=("${args[@]}" "-e" "$(printf '%q' "PS1=$(_docker-ps1)")")
         args=("${args[@]}" "-e" "$(printf '%q' "PS2=$(echo -e "\xe2\x86\x92") ")")
-        # args=("${args[@]}" "-v" "/var/lib/boot2docker/.docker_history:/root/.bash_history")
         args=("${args[@]}" "-v" "$(printf '%q' "/mnt/hgfs$(realpath "$HOME")/.docker/.docker_history:/root/.bash_history")")
 
         # process mounts
@@ -472,33 +471,33 @@ case "$SHELL_DOCKER_ACTION" in
             prev_arg="$arg"
         done
         # send the remapped volume paths
-        docker-ssh docker "$SHELL_DOCKER_ACTION" "${args[@]}"
+        _docker-ssh docker "$SHELL_DOCKER_ACTION" "${args[@]}"
     ;;
     start|stop|kill)
-        docker-startup
-        docker-ssh docker "$SHELL_DOCKER_ACTION" "$@"
+        _docker-startup
+        _docker-ssh docker "$SHELL_DOCKER_ACTION" "$@"
     ;;
     build|cp)
-        docker-startup
+        _docker-startup
         # always try to change the working directory to $PWD
-        docker-ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker "$SHELL_DOCKER_ACTION" "$@"
+        _docker-ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker "$SHELL_DOCKER_ACTION" "$@"
     ;;
     compose)
-        docker-startup
+        _docker-startup
         # remap working dir
         # alias docker-compose="docker compose"
         WORKDIR="/mnt/hgfs$(realpath "$(pwd)")"
         docker run -it --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd)":"${WORKDIR}" -w "${WORKDIR}" docker/compose:$LATEST_DOCKER_COMPOSE_TAG "$@"
     ;;
     *)
-        docker-startup
+        _docker-startup
 
         # run plugin architecture command instead
         if type "docker-$SHELL_DOCKER_ACTION" &>/dev/null; then
             "docker-$SHELL_DOCKER_ACTION" "$@"
         else
             # default run docker command on remote host
-            docker-ssh docker "$SHELL_DOCKER_ACTION" $(docker-escape-args "$@")
+            _docker-ssh docker "$SHELL_DOCKER_ACTION" $(_docker-escape-args "$@")
         fi
     ;;
 esac
