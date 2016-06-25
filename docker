@@ -140,18 +140,26 @@ function _docker-boot2docker-iso-url () {
 
 function _docker-download-iso () {
     local ISO_URL="$(_docker-boot2docker-iso-url)"
+    local ISO_PATH="$VMDIR/boot2docker.iso"
     if [[ -z "${ISO_URL}" ]]; then
-        exit 1
+        return 1
     fi
 
-    local ISO_PATH="$VMDIR/boot2docker.iso"
+    # use cached copy
+    if [[ -e "${DOCKER_CONFIG_HOME}/boot2docker-${LATEST_BOOT2DOCKER_TAG}.iso" ]]; then
+        rm -f "$ISO_PATH" || true
+        cp "${DOCKER_CONFIG_HOME}/boot2docker-${LATEST_BOOT2DOCKER_TAG}.iso" "$ISO_PATH"
+        return 0
+    fi
+
     curl -L# "$ISO_URL" > "$ISO_PATH.new"
     if [[ $? == 0 ]]; then
         rm -f "$ISO_PATH" || true
-        mv "$ISO_PATH.new" "$ISO_PATH"
+        mv "$ISO_PATH.new" "${DOCKER_CONFIG_HOME}/boot2docker-${LATEST_BOOT2DOCKER_TAG}.iso"
+        cp "${DOCKER_CONFIG_HOME}/boot2docker-${LATEST_BOOT2DOCKER_TAG}.iso" "$ISO_PATH"
     else
         echo "Failed to download!"
-        exit 1
+        return 1
     fi
 }
 
