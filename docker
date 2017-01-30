@@ -8,8 +8,8 @@ VM_ROOT_DIR="${VM_ROOT_DIR-"$(cygpath --mydocs)/Virtual Machines"}"
 VMPATH="$(cygpath -w "$(realpath "${VM_ROOT_DIR}")")"'\boot2docker\boot2docker.vmx'
 VMDKPATH="$(cygpath -w "$(realpath "${VM_ROOT_DIR}")")"'\boot2docker\boot2docker.vmdk'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
-LATEST_BOOT2DOCKER_TAG="v1.12.3"
-LATEST_DOCKER_COMPOSE_TAG="1.9.0"
+LATEST_BOOT2DOCKER_TAG="v1.13.0"
+LATEST_DOCKER_COMPOSE_TAG="1.10.0"
 DOCKER_USER_PASSWD=tcuser
 DOCKER_CONFIG_HOME="$HOME/.docker"
 
@@ -28,7 +28,7 @@ function _docker-host () {
 }
 
 function _docker-ssh () {
-    if [[ ! -t 0 || ! -t 1 ]]; then
+    if [[ ! -t 0 && ! -t 1 ]]; then
         # pipe mode
         ssh ${SSH_OPTIONS} docker@$(_docker-host) -- "$@"
     else
