@@ -8,8 +8,8 @@ VM_ROOT_DIR="${VM_ROOT_DIR-"$(cygpath --mydocs)/Virtual Machines"}"
 VMPATH="$(cygpath -w "$(realpath "${VM_ROOT_DIR}")")"'\boot2docker\boot2docker.vmx'
 VMDKPATH="$(cygpath -w "$(realpath "${VM_ROOT_DIR}")")"'\boot2docker\boot2docker.vmdk'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
-LATEST_BOOT2DOCKER_TAG="v1.13.1"
-LATEST_DOCKER_COMPOSE_TAG="1.11.1"
+LATEST_BOOT2DOCKER_TAG="v17.03.0-ce"
+LATEST_DOCKER_COMPOSE_TAG="1.11.2"
 DOCKER_USER_PASSWD=tcuser
 DOCKER_CONFIG_HOME="$HOME/.docker"
 
@@ -237,10 +237,6 @@ ln -sf /var/lib/boot2docker/.ash_history .ash_history
 sudo tar -vcf /mnt/sda1/var/lib/boot2docker/userdata.tar .ssh .ash_history .profile
 cd "\$WORKING_DIR"
 echo -ne "\033[0m"
-
-echo search localdomain > /etc/resolv.conf
-echo nameserver 8.8.8.8 >> /etc/resolv.conf
-echo nameserver 8.8.4.4 >> /etc/resolv.conf
 
 echo -e "\033[0;32mDownloading additional modules\033[0m"
 
