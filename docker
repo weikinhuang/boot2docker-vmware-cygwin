@@ -3,13 +3,19 @@
 SCRIPT="$0"
 
 SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o ConnectTimeout=5"
-VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
+if [[ "$(uname -m)" == "x86_64" ]]; then
+    VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
+    VMFSTOOLS_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmware-vdiskmanager.exe'
+else
+    VMRUN_BIN='C:\Program Files\VMware\VMware Workstation\vmrun.exe'
+    VMFSTOOLS_BIN='C:\Program Files\VMware\VMware Workstation\vmware-vdiskmanager.exe'
+fi
 VM_ROOT_DIR="${VM_ROOT_DIR-"$(cygpath --mydocs)/Virtual Machines"}"
 VMPATH="$(cygpath -w "$(realpath "${VM_ROOT_DIR}")")"'\boot2docker\boot2docker.vmx'
 VMDKPATH="$(cygpath -w "$(realpath "${VM_ROOT_DIR}")")"'\boot2docker\boot2docker.vmdk'
 VMDIR="$(dirname "$(cygpath "$VMPATH")")"
-LATEST_BOOT2DOCKER_TAG="v17.03.0-ce"
-LATEST_DOCKER_COMPOSE_TAG="1.11.2"
+LATEST_BOOT2DOCKER_TAG="v17.05.0-ce"
+LATEST_DOCKER_COMPOSE_TAG="1.13.0"
 DOCKER_USER_PASSWD=tcuser
 DOCKER_CONFIG_HOME="$HOME/.docker"
 
@@ -58,15 +64,81 @@ function _docker-get () {
     scp -r ${SSH_OPTIONS} docker@$(_docker-host):"$TARGET" "$DEST"
 }
 
+function _docker-create-vm-vmx () {
+    cat <<-EOF
+.encoding = "windows-1252"
+config.version = "8"
+logging = "FALSE"
+virtualHW.version = "11"
+numvcpus = "2"
+cpuid.coresPerSocket = "2"
+vcpu.hotadd = "TRUE"
+scsi0.present = "TRUE"
+scsi0.virtualDev = "lsilogic"
+memsize = "2048"
+mem.hotadd = "TRUE"
+mainMem.save.vmem = "FALSE"
+MemTrimRate = "0"
+scsi0:0.present = "TRUE"
+scsi0:0.fileName = "boot2docker.vmdk"
+ide1:0.present = "TRUE"
+ide1:0.fileName = "boot2docker.iso"
+ide1:0.deviceType = "cdrom-image"
+ethernet0.present = "TRUE"
+ethernet0.connectionType = "nat"
+ethernet0.virtualDev = "e1000"
+ethernet0.wakeOnPcktRcv = "FALSE"
+ethernet0.addressType = "generated"
+ethernet1.present = "TRUE"
+ethernet1.connectionType = "hostonly"
+ethernet1.wakeOnPcktRcv = "FALSE"
+ethernet1.addressType = "generated"
+pciBridge0.present = "TRUE"
+pciBridge4.present = "TRUE"
+pciBridge4.virtualDev = "pcieRootPort"
+pciBridge4.functions = "8"
+pciBridge5.present = "TRUE"
+pciBridge5.virtualDev = "pcieRootPort"
+pciBridge5.functions = "8"
+pciBridge6.present = "TRUE"
+pciBridge6.virtualDev = "pcieRootPort"
+pciBridge6.functions = "8"
+pciBridge7.present = "TRUE"
+pciBridge7.virtualDev = "pcieRootPort"
+pciBridge7.functions = "8"
+vmci0.present = "TRUE"
+hpet0.present = "TRUE"
+displayName = "boot2docker"
+guestOS = "other26xlinux-64"
+nvram = "boot2docker.nvram"
+virtualHW.productCompatibility = "hosted"
+powerType.powerOff = "soft"
+powerType.powerOn = "soft"
+powerType.suspend = "soft"
+powerType.reset = "soft"
+extendedConfigFile = "boot2docker.vmxf"
+floppy0.present = "FALSE"
+isolation.tools.unity.disable = "TRUE"
+unity.allowCompositingInGuest = "FALSE"
+unity.enableLaunchMenu = "FALSE"
+unity.showBadges = "FALSE"
+unity.showBorders = "FALSE"
+unity.wasCapable = "FALSE"
+sched.mem.pshare.enable = "FALSE"
+EOF
+}
+
 function _docker-create-vm () {
     # allow differently sized vms
-    local VMDK_SIZE="${VMDK_SIZE-16G}"
+    local VMDK_SIZE="${VMDK_SIZE-16GB}"
     local VMEM_SIZE="${VMEM_SIZE-2048}"
 
     mkdir -p "${VMDIR}"
 
-    curl -L# "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmx" > "${VMDIR}/boot2docker.vmx"
-    curl -L# "https://raw.githubusercontent.com/weikinhuang/boot2docker-vmware-cygwin/master/boot2docker.vmdk.${VMDK_SIZE}.tar.gz" | tar -zxO > "${VMDIR}/boot2docker.vmdk"
+    # generate the vmx file
+    _docker-create-vm-vmx > "${VMDIR}/boot2docker.vmx"
+    # generate the vmdk disk
+    ( cd "${VMDIR}"; "$(cygpath -u "$VMFSTOOLS_BIN")" -c -s "${VMDK_SIZE}" -a lsilogic -t 0 boot2docker.vmdk )
 
     # allow access to all cores
     local PROC_CORES=$(grep "^processor" -c /proc/cpuinfo)
@@ -238,25 +310,12 @@ sudo tar -vcf /mnt/sda1/var/lib/boot2docker/userdata.tar .ssh .ash_history .prof
 cd "\$WORKING_DIR"
 echo -ne "\033[0m"
 
-echo -e "\033[0;32mDownloading additional modules\033[0m"
-
-echo -ne "\033[0;34m"
-sudo mkdir -p /mnt/sda1/var/lib/boot2docker/tcz
-
-sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-terminfo.tcz \$TCL_REPO_BASE/tcz/ncurses-terminfo.tcz
-sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/ncurses-utils.tcz \$TCL_REPO_BASE/tcz/ncurses-utils.tcz
-sudo wget -O /mnt/sda1/var/lib/boot2docker/tcz/htop.tcz \$TCL_REPO_BASE/tcz/htop.tcz
-
-echo -ne "\033[0m"
-
 echo -e "\033[0;32mInstalling local boot script and profile\033[0m"
 
 echo -e "\033[0;34m"
 
 sudo tee /mnt/sda1/var/lib/boot2docker/bootlocal.sh << BOOT2DOCKER_INIT_SCRIPT
 #!/bin/sh
-
-su - docker -c 'tce-load -i /var/lib/boot2docker/tcz/*.tcz'
 
 echo > /var/lib/boot2docker/docker.log
 
@@ -373,6 +432,9 @@ case "$SHELL_DOCKER_ACTION" in
             download)
                 _docker-download-iso
             ;;
+            htop)
+                _docker-ssh docker run -it --rm --pid=host terencewestphal/htop
+            ;;
             init)
                 _docker-vm-init
             ;;
@@ -423,16 +485,11 @@ case "$SHELL_DOCKER_ACTION" in
             echo '    ├ create      Create the boot2docker vm'
             echo '    ├ destroy     Destroy the boot2docker vm'
             echo '    ├ download    Download the latest boot2docker.iso'
-            echo '    ├ fwd         Forwarding server, subactions:'
-            echo '    │ ├ pid           Get the port forwarding managing server pid'
-            echo '    │ ├ ports         List active ports forwarded to the host'
-            echo '    │ ├ published     List published ports from all containers'
-            echo '    │ ├ reload        Notify the port forwarding managing server of port changes'
-            echo '    │ ├ start         Start the port forwarding managing server'
-            echo '    │ └ stop          Stop port forwarding managing server'
+            echo '    ├ htop        Run htop in the boot2docker vm'
             echo '    ├ init        Initialize the boot2docker vm'
             echo '    ├ poweroff    Power off the boot2docker vm'
             echo '    ├ reboot      Reboot the boot2docker vm'
+            echo '    ├ rebuild     Recreate and initialize the boot2docker vm'
             echo '    └ run         Run a vmware command against boot2docker vm'
         fi
     ;;
