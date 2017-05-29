@@ -433,7 +433,7 @@ case "$SHELL_DOCKER_ACTION" in
                 _docker-download-iso
             ;;
             htop)
-                _docker-ssh docker run -it --rm --pid=host terencewestphal/htop
+                _docker-ssh docker run -it --rm --pid=host jess/htop htop "$@"
             ;;
             init)
                 _docker-vm-init
