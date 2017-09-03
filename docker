@@ -22,11 +22,6 @@ SELF="$0"
 VERSION_BOOT2DOCKER="v17.07.0-ce"
 VERSION_DOCKER_COMPOSE="1.16.1"
 
-# ssh options
-SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o ConnectTimeout=5"
-BOOT2DOCKER_USER_USER=docker
-BOOT2DOCKER_USER_PASSWD=tcuser
-
 # vmware info
 if [[ "$(uname -m)" == "x86_64" ]]; then
     VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
@@ -48,6 +43,38 @@ DOCKER_MACHINE_VMPATH="$(cygpath -w "$(realpath "${MACHINE_STORAGE_PATH}")")"'\b
 DOCKER_MACHINE_VMDKPATH="$(cygpath -w "$(realpath "${MACHINE_STORAGE_PATH}")")"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'\boot2docker.vmdk'
 DOCKER_MACHINE_VMDIR="$(dirname "$(cygpath "${DOCKER_MACHINE_VMPATH}")")"
 DOCKER_CERT_PATH="${DOCKER_MACHINE_VMDIR}"
+
+# ssh options
+SSH_OPTIONS=( -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i "${DOCKER_MACHINE_VMDIR}/docker_id_rsa" )
+BOOT2DOCKER_USER_USER=docker
+BOOT2DOCKER_USER_PASSWD=tcuser
+
+#==============================================================================
+# Internal functions
+#==============================================================================
+function internal::escape-args() {
+  if [[ $# == 0 ]]; then
+    return
+  fi
+  local args=( )
+  for arg in "$@"; do
+    args=("${args[@]}" $(printf '%q' "$arg"))
+  done
+  echo "${args[@]}"
+}
+
+function internal::custom-ps1() {
+  local PS1_COLOR_RESET='\[\e[0m\]'
+  local PS1_COLOR_EXIT_ERROR='\[\e[38;5;196m\]'
+  local PS1_COLOR_USER='\[\e[38;5;197m\]'
+  local PS1_COLOR_HOST='\[\e[38;5;208m\]'
+  local PS1_COLOR_HOST_SCREEN='\[\e[4m\]\[\e[38;5;214m\]'
+  local PS1_COLOR_WORK_DIR='\[\e[38;5;142m\]'
+
+  local PS1_EXIT_STATUS='$(EXIT="$?"; [[ $EXIT -ne 0 ]] && echo -n "(E:${EXIT}) ")'
+
+  echo "[${PS1_COLOR_EXIT_ERROR}${PS1_EXIT_STATUS}${PS1_COLOR_RESET}${PS1_COLOR_USER}\u${PS1_COLOR_RESET}@${PS1_COLOR_HOST_SCREEN}docker${PS1_COLOR_RESET}.${PS1_COLOR_HOST}\h${PS1_COLOR_RESET} ${PS1_COLOR_WORK_DIR}\W${PS1_COLOR_RESET}]$(echo -e "\xE2\x99\xAB") "
+}
 
 #==============================================================================
 # Vmware workstation functions
@@ -182,192 +209,73 @@ function vmware::ip-addr() {
   fi
 }
 
-#==============================================================================
-# docker internal functions
-#==============================================================================
-function boot2docker::iso-url() {
-  echo "https://github.com/boot2docker/boot2docker/releases/download/${VERSION_BOOT2DOCKER}/boot2docker.iso"
+vmware::wait-for-tools() {
+  local COUNTER=0
+  while ( ! vmware::vmrun checkToolsState 2>&1 | grep 'running\|installed' &>/dev/null ) && [[ ${COUNTER} -lt 20 ]]; do
+    sleep 15
+    COUNTER=$((COUNTER+1))
+  done
 }
 
-function boot2docker::download-iso() {
-  local ISO_URL="$(boot2docker::iso-url)"
-  local ISO_CACHE="${DOCKER_CONFIG_HOME}/boot2docker-${VERSION_BOOT2DOCKER}.iso"
-  local ISO_PATH="${DOCKER_MACHINE_VMDIR}/boot2docker.iso"
-  if [[ -z "${ISO_URL}" ]]; then
-    return 1
+function vmware::shrink() {
+  echo -ne "\033[0;32m"
+  echo "Cleaning ALL up docker images"
+  echo -ne "\033[0m\033[0;34m"
+  if [[ $1 == "-a" ]]; then
+    boot2docker::ssh docker rm $(boot2docker::ssh docker ps -a -q)
   fi
-
-  # cache iso
-  if [[ ! -e "${ISO_CACHE}" ]]; then
-    if ! curl --fail -sSL# "${ISO_URL}" -o "${ISO_CACHE}"; then
-      echo "Failed to download!" 1>&2
-      return 1
-    fi
-  fi
-
-  # use cached copy
-  rm -f "${ISO_PATH}" || true
-  cp "${ISO_CACHE}" "${ISO_PATH}"
-  return 0
-}
-
-function boot2docker::host() {
-    # shortcut to save from reading the machine state
-    if [[ -n "${DOCKER_IP:-}" ]]; then
-        echo "${DOCKER_IP:-}"
-        return 0
-    fi
-    echo $(vmware::ip-addr)
-}
-
-function boot2docker::ssh() {
-  if [[ ! -t 0 && ! -t 1 ]]; then
-    # pipe mode
-    ssh ${SSH_OPTIONS} ${BOOT2DOCKER_USER_USER}@$(boot2docker::host) -- "$@"
-  else
-    # non pipe mode
-    ssh ${SSH_OPTIONS} -t ${BOOT2DOCKER_USER_USER}@$(boot2docker::host) -- "$@"
-  fi
-}
-
-function boot2docker::ssh-batch-mode() {
-  ssh ${SSH_OPTIONS} -o 'Batchmode yes' ${BOOT2DOCKER_USER_USER}@$(boot2docker::host) -- "$@"
-}
-
-#==============================================================================
-# docker functions
-#==============================================================================
-
-#==============================================================================
-# docker-compose functions
-#==============================================================================
-
-#==============================================================================
-# docker-machine functions
-#==============================================================================
-
-#==============================================================================
-# Entrypoint
-#==============================================================================
-function main() {
-  env
-}
-
-#==============================================================================
-# Run Script
-#==============================================================================
-#main "$@"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#==============================================================================
-# Run Script
-#==============================================================================
-function _docker-escape-args () {
-    if [[ $# == 0 ]]; then
-        return
-    fi
-    args=( )
-    for arg in "$@"; do
-        args=("${args[@]}" $(printf '%q' "$arg"))
-    done
-    echo "${args[@]}"
-}
-
-function _docker-get () {
-    local TARGET="$1"
-    local DEST="${2-.}"
-    scp -r ${SSH_OPTIONS} docker@$(boot2docker::host):"$TARGET" "$DEST"
-}
-
-function _docker-destroy-vm () {
-    vmware::vmrun stop hard || true
-    rm -rf "$DOCKER_MACHINE_VMDIR"
-}
-
-function _docker-vmup () {
-    vmware::vmrun start nogui
-}
-
-function _docker-vmdown () {
-    vmware::vmrun stop
-}
-
-function _docker-vm-is-on () {
-    "$(cygpath -u "$VMRUN_BIN")" list | tr -d '\r' | sed 's/\\/\//g' | grep "$(cygpath -w "$DOCKER_MACHINE_VMPATH" | sed 's/\\/\//g')" 2>&1 >/dev/null
-}
-
-function _docker-reboot () {
-    boot2docker::ssh sudo reboot
-}
-
-function _docker-startup () {
-    if ! _docker-vm-is-on; then
-        _docker-vmup
-        _docker-vm-wait-for-tools
-    fi
-}
-
-_docker-vm-wait-for-tools () {
-    local COUNTER=0
-    while ( ! vmware::vmrun checkToolsState 2>&1 | grep 'running\|installed' &>/dev/null ) && [[ $COUNTER -lt 20 ]]; do
-        sleep 15
-        COUNTER=$((COUNTER+1))
-    done
+  boot2docker::ssh docker rmi $(boot2docker::ssh docker images | grep "^<none>" | awk '{print $3}')
+  echo -ne "\033[0m\033[0;32m"
+  echo "Shrinking disk"
+  echo -ne "\033[0m\033[0;34m"
+  local VMDK_SIZE_OLD=$(du -hs "$(cygpath -u "$DOCKER_MACHINE_VMDKPATH")" | awk '{print $1}')
+  boot2docker::ssh sudo vmware-toolbox-cmd disk shrink /mnt/sda1
+  local VMDK_SIZE_NEW=$(du -hs "$(cygpath -u "$DOCKER_MACHINE_VMDKPATH")" | awk '{print $1}')
+  echo -ne "\033[0m"
+  echo -e "\033[0;32mOld Size: \033[1;32m${VMDK_SIZE_OLD}\033[0m"
+  echo -ne "\033[0m"
+  echo -e "\033[0;32mNew Size: \033[1;32m${VMDK_SIZE_NEW}\033[0m"
+  echo -ne "\033[0m"
 }
 
 function _docker-vm-init () {
-    # http://odewahn.github.io/docker-jumpstart/boot2docker.html
-    # http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
+  # http://odewahn.github.io/docker-jumpstart/boot2docker.html
+  # http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
 
-    local ID_RSA_PUB="$(cat ~/.ssh/id_rsa.pub)"
+  # generate ssh key
+  ssh-keygen -t rsa -N "" -C "SSH for boot2docker ${DOCKER_MACHINE_NAME}" -f "${DOCKER_MACHINE_VMDIR}/docker_id_rsa"
 
-    if vmware::vmrun checkToolsState | grep 'running\|installed' &>/dev/null; then
-        # try to push ssh keys through vmware guest tools
-        vmware::vmrun runScriptInGuest /bin/sh "\
-            sudo chown docker -R /home/docker/.ssh; \
-            mkdir /home/docker/.ssh || true; \
-            chmod 700 /home/docker/.ssh || true; \
-            chmod 600 /home/docker/.ssh/authorized_keys; \
-            cat /home/docker/.ssh/authorized_keys | grep \"${ID_RSA_PUB}\" || echo \"${ID_RSA_PUB}\" >> /home/docker/.ssh/authorized_keys; \
-            sudo chown docker -R /home/docker/.ssh; \
-            vmtoolsd --cmd \"info-set guestinfo.b2d.eth0 \$(ifconfig | grep '\<eth0\>' -A1 | awk '/inet addr/{print substr(\$2,6)}')\" \
-            "
-    else
-        echo "Default password is '$BOOT2DOCKER_USER_PASSWD'"
-    fi
+  local ID_RSA_PUB="$(cat "${DOCKER_MACHINE_VMDIR}/docker_id_rsa.pub")"
+
+  if vmware::vmrun checkToolsState | grep 'running\|installed' &>/dev/null; then
+    # try to push ssh keys through vmware guest tools
+    vmware::vmrun runScriptInGuest /bin/sh "\
+      sudo chown docker -R /home/docker/.ssh; \
+      mkdir /home/docker/.ssh || true; \
+      chmod 700 /home/docker/.ssh || true; \
+      chmod 600 /home/docker/.ssh/authorized_keys; \
+      cat /home/docker/.ssh/authorized_keys | grep \"${ID_RSA_PUB}\" || echo \"${ID_RSA_PUB}\" >> /home/docker/.ssh/authorized_keys; \
+      sudo chown docker -R /home/docker/.ssh; \
+      vmtoolsd --cmd \"info-set guestinfo.b2d.eth0 \$(ifconfig | grep '\<eth0\>' -A1 | awk '/inet addr/{print substr(\$2,6)}')\" \
+    "
+  else
+    echo "Failed to initialize vm!" 1>&2
+    return 1
+  fi
 
 boot2docker::ssh << DOCKER_INIT
 #!/bin/sh
 
 if ! blkid -c /dev/null | grep boot2docker-data &>/dev/null; then
-    echo -e "\033[0;32mFormatting /dev/sda\033[0m"
+  echo -e "\033[0;32mFormatting /dev/sda\033[0m"
 
-    echo -ne "\033[0;34m"
-    echo -e "n\np\n1\n\n\nw\n" | sudo fdisk /dev/sda
-    sudo mkfs.ext4 -L boot2docker-data /dev/sda1
-    sudo mkdir /mnt/sda1
-    sudo mount -t ext4 /dev/sda1 /mnt/sda1
-    sudo mkdir -p /mnt/sda1/var/lib/boot2docker
-    echo -ne "\033[0m"
+  echo -ne "\033[0;34m"
+  echo -e "n\np\n1\n\n\nw\n" | sudo fdisk /dev/sda
+  sudo mkfs.ext4 -L boot2docker-data /dev/sda1
+  sudo mkdir /mnt/sda1
+  sudo mount -t ext4 /dev/sda1 /mnt/sda1
+  sudo mkdir -p /mnt/sda1/var/lib/boot2docker
+  echo -ne "\033[0m"
 fi
 
 TCL_REPO_BASE=http://tinycorelinux.net/6.x/x86_64
@@ -441,285 +349,307 @@ echo -e "\033[0;32mRebooting\033[0m"
 sudo reboot
 
 DOCKER_INIT
-    sleep 20
-    _docker-vm-wait-for-tools
+  sleep 20
+  vmware::wait-for-tools
 
-    echo -e "\033[0;32mPulling ssl certs\033[0m\033[0;34m"
-    _docker-get '~/.docker/*' "${DOCKER_CERT_PATH}/" || true
-    touch "${DOCKER_CONFIG_HOME}/.docker_history"
-    echo -ne "\033[0m"
+  echo -e "\033[0;32mPulling ssl certs\033[0m\033[0;34m"
+  boot2docker::get '~/.docker/*' "${DOCKER_CERT_PATH}/" || true
+  touch "${DOCKER_CONFIG_HOME}/.docker_history"
+  echo -ne "\033[0m"
 
-    echo -e "\033[0;32mReady\033[0m"
+  echo -e "\033[0;32mReady\033[0m"
 }
 
-function _docker-vm-clean () {
-    echo -ne "\033[0;32m"
-    echo "Cleaning ALL up docker images"
-    echo -ne "\033[0m\033[0;34m"
-    if [[ $1 == "-a" ]]; then
-        boot2docker::ssh docker rm $(boot2docker::ssh docker ps -a -q)
+#==============================================================================
+# docker internal functions
+#==============================================================================
+function boot2docker::iso-url() {
+  echo "https://github.com/boot2docker/boot2docker/releases/download/${VERSION_BOOT2DOCKER}/boot2docker.iso"
+}
+
+function boot2docker::download-iso() {
+  local ISO_URL="$(boot2docker::iso-url)"
+  local ISO_CACHE="${DOCKER_CONFIG_HOME}/boot2docker-${VERSION_BOOT2DOCKER}.iso"
+  local ISO_PATH="${DOCKER_MACHINE_VMDIR}/boot2docker.iso"
+  if [[ -z "${ISO_URL}" ]]; then
+    return 1
+  fi
+
+  # cache iso
+  if [[ ! -e "${ISO_CACHE}" ]]; then
+    if ! curl --fail -sSL# "${ISO_URL}" -o "${ISO_CACHE}"; then
+      echo "Failed to download!" 1>&2
+      return 1
     fi
-    boot2docker::ssh docker rmi $(boot2docker::ssh docker images | grep "^<none>" | awk '{print $3}')
-    echo -ne "\033[0m\033[0;32m"
-    echo "Shrinking disk"
-    echo -ne "\033[0m\033[0;34m"
-    VMDK_SIZE_OLD=$(du -hs "$(cygpath -u "$DOCKER_MACHINE_VMDKPATH")" | awk '{print $1}')
-    boot2docker::ssh sudo vmware-toolbox-cmd disk shrink /mnt/sda1
-    VMDK_SIZE_NEW=$(du -hs "$(cygpath -u "$DOCKER_MACHINE_VMDKPATH")" | awk '{print $1}')
-    echo -ne "\033[0m"
-    echo -e "\033[0;32mOld Size: \033[1;32m${VMDK_SIZE_OLD}\033[0m"
-    echo -ne "\033[0m"
-    echo -e "\033[0;32mNew Size: \033[1;32m${VMDK_SIZE_NEW}\033[0m"
-    echo -ne "\033[0m"
+  fi
+
+  # use cached copy
+  rm -f "${ISO_PATH}" || true
+  cp "${ISO_CACHE}" "${ISO_PATH}"
+  return 0
 }
 
-function _docker-ps1 () {
-    local PS1_COLOR_RESET='\[\e[0m\]'
-    local PS1_COLOR_EXIT_ERROR='\[\e[38;5;196m\]'
-    local PS1_COLOR_USER='\[\e[38;5;197m\]'
-    local PS1_COLOR_HOST='\[\e[38;5;208m\]'
-    local PS1_COLOR_HOST_SCREEN='\[\e[4m\]\[\e[38;5;214m\]'
-    local PS1_COLOR_WORK_DIR='\[\e[38;5;142m\]'
-
-    local PS1_EXIT_STATUS='$(EXIT="$?"; [[ $EXIT -ne 0 ]] && echo -n "(E:${EXIT}) ")'
-
-    echo "[${PS1_COLOR_EXIT_ERROR}${PS1_EXIT_STATUS}${PS1_COLOR_RESET}${PS1_COLOR_USER}\u${PS1_COLOR_RESET}@${PS1_COLOR_HOST_SCREEN}docker${PS1_COLOR_RESET}.${PS1_COLOR_HOST}\h${PS1_COLOR_RESET} ${PS1_COLOR_WORK_DIR}\W${PS1_COLOR_RESET}]$(echo -e "\xE2\x99\xAB") "
+function boot2docker::host() {
+  # shortcut to save from reading the machine state
+  if [[ -n "${DOCKER_IP:-}" ]]; then
+    echo "${DOCKER_IP:-}"
+    return 0
+  fi
+  echo $(vmware::ip-addr)
 }
 
+function boot2docker::ssh() {
+  if [[ ! -t 0 && ! -t 1 ]]; then
+    # pipe mode
+    ssh "${SSH_OPTIONS[@]}" ${BOOT2DOCKER_USER_USER}@$(boot2docker::host) -- "$@"
+  else
+    # non pipe mode
+    ssh "${SSH_OPTIONS[@]}" -t ${BOOT2DOCKER_USER_USER}@$(boot2docker::host) -- "$@"
+  fi
+}
 
+function boot2docker::ssh-batch-mode() {
+  ssh "${SSH_OPTIONS[@]}" -o 'Batchmode yes' ${BOOT2DOCKER_USER_USER}@$(boot2docker::host) -- "$@"
+}
 
+function boot2docker::get() {
+  local TARGET="$1"
+  local DEST="${2-.}"
+  scp -r "${SSH_OPTIONS[@]}" docker@$(boot2docker::host):"${TARGET}" "${DEST}"
+}
 
+#==============================================================================
+# docker functions
+#==============================================================================
 
+#==============================================================================
+# docker-compose functions
+#==============================================================================
 
+#==============================================================================
+# docker-machine functions
+#==============================================================================
+function docker-machine::rm() {
+  vmware::vmrun stop hard || true
+  rm -rf "${DOCKER_MACHINE_VMDIR}"
+}
 
+function docker-machine::start() {
+  vmware::vmrun start nogui
+}
 
+function docker-machine::stop() {
+  vmware::vmrun stop
+}
 
+function docker-machine::is-on() {
+  "$(cygpath -u "$VMRUN_BIN")" list \
+    | tr -d '\r' \
+    | sed 's/\\/\//g' \
+    | grep "$(cygpath -w "$DOCKER_MACHINE_VMPATH" | sed 's/\\/\//g')" \
+      2>&1 >/dev/null
+}
 
+function docker-machine::status() {
+  if docker-machine::is-on; then
+    echo 'Running'
+  else
+    echo 'Stopped'
+  fi
+}
 
+function docker-machine::restart() {
+  boot2docker::ssh sudo reboot
+}
 
+function docker-machine::startup() {
+  if ! docker-machine::is-on; then
+    docker-machine::start
+    vmware::wait-for-tools
+  fi
+}
 
+#==============================================================================
+# Entrypoint
+#==============================================================================
+function main() {
+  local SHELL_DOCKER_ACTION="$1"
+  shift
+  case "$SHELL_DOCKER_ACTION" in
+      ssh)
+          boot2docker::ssh "$@"
+      ;;
+      ssh-batch)
+          boot2docker::ssh-batch-mode "$@"
+      ;;
+      curl)
+          curl --insecure --cert "${DOCKER_CERT_PATH}/cert.pem" --key "${DOCKER_CERT_PATH}/key.pem" "$@"
+      ;;
+      vm)
+          SHELL_DOCKER_SUBACTION="$1"
+          shift
+          case "$SHELL_DOCKER_SUBACTION" in
+              build)
+                  vmware::create-vm
+                  boot2docker::download-iso
+                  docker-machine::start
+                  vmware::wait-for-tools
+                  _docker-vm-init
+              ;;
+              clean)
+                  vmware::shrink
+              ;;
+              confdir)
+                  echo "$DOCKER_CERT_PATH"
+              ;;
+              create)
+                  echo -ne "\033[0;34m"
+                  vmware::create-vm
+                  boot2docker::download-iso
+                  echo -ne "\033[0m"
+              ;;
+              destroy)
+                  docker-machine::rm
+              ;;
+              download)
+                  boot2docker::download-iso
+              ;;
+              htop)
+                  boot2docker::ssh docker run -it --rm --pid=host jess/htop htop "$@"
+              ;;
+              init)
+                  _docker-vm-init
+              ;;
+              poweroff)
+                  vmware::vmrun stop hard
+              ;;
+              reboot)
+                  docker-machine::restart
+                  sleep 20
+                  vmware::wait-for-tools
+              ;;
+              rebuild)
+                  docker vm destroy
+                  docker vm build
+              ;;
+              run)
+                  vmware::vmrun "$@"
+              ;;
+              *)
+                  exit 1
+              ;;
+          esac
+      ;;
+      ip)
+          vmware::ip-addr
+      ;;
+      up)
+          docker-machine::start
+          vmware::wait-for-tools
+      ;;
+      down)
+          docker-machine::stop
+      ;;
+      help)
+          boot2docker::ssh docker help "$@"
+          if [[ $# == 0 ]]; then
+              echo
+              echo 'Additional options for windows docker script:'
+              echo
+              echo '    curl      Make a curl request against the docker api, use https://localhost:2376/'
+              echo '    down      Stop the boot2docker vm'
+              echo '    ip        Get the ip of the boot2docker vm'
+              echo '    ssh       SSH into docker server or run remote commands'
+              echo '    up        Start the boot2docker vm'
+              echo '    vm        Execute actions against the virtual machine, subactions:'
+              echo '    ├ build       Create and initialize the boot2docker vm'
+              echo '    ├ clean       Remove unused docker images and containers. Use -a to remove stopped containers'
+              echo '    ├ create      Create the boot2docker vm'
+              echo '    ├ destroy     Destroy the boot2docker vm'
+              echo '    ├ download    Download the latest boot2docker.iso'
+              echo '    ├ htop        Run htop in the boot2docker vm'
+              echo '    ├ init        Initialize the boot2docker vm'
+              echo '    ├ poweroff    Power off the boot2docker vm'
+              echo '    ├ reboot      Reboot the boot2docker vm'
+              echo '    ├ rebuild     Recreate and initialize the boot2docker vm'
+              echo '    └ run         Run a vmware command against boot2docker vm'
+          fi
+      ;;
+      run)
+          docker-machine::startup
+          args=( )
+          prev_arg=
 
+          # generate a persistent history file
+          args=("${args[@]}" "-e" "HISTFILE=/root/.bash_history")
+          args=("${args[@]}" "-e" "$(printf '%q' "HISTIGNORE=${HISTIGNORE}")")
+          args=("${args[@]}" "-e" "$(printf '%q' "HISTCONTROL=${HISTCONTROL}")")
+          args=("${args[@]}" "-e" "HISTSIZE=${HISTSIZE}")
+          args=("${args[@]}" "-e" "HISTFILESIZE=${HISTFILESIZE}")
+          args=("${args[@]}" "-e" "$(printf '%q' "PROMPT_COMMAND=history -a")")
+          args=("${args[@]}" "-e" "$(printf '%q' "PS1=$(internal::custom-ps1)")")
+          args=("${args[@]}" "-e" "$(printf '%q' "PS2=$(echo -e "\xe2\x86\x92") ")")
+          args=("${args[@]}" "-v" "$(printf '%q' "/mnt/hgfs$(realpath "$HOME")/.docker/.docker_history:/root/.bash_history")")
 
+          # process mounts
+          for arg in "$@"; do
+              # if argument is a file, then expand it to windows paths
+              if [[ "$prev_arg" == '-v' ]]; then
+                  # docker doesn't support -vPATH:PATH only -v PATH:PATH
+                  # previous arg was a volume indicator
+                  dir="$(echo "${arg}" | cut -d':' -f1)"
+                  if [[ -e "$dir" && "$(realpath "${dir}")" =~ ^/[a-z]/ && "$dir" != /tmp* ]]; then
+                      map="$(echo "${arg}" | cut -d':' -f2)"
+                      res="/mnt/hgfs$(realpath "${dir}")"
+                      if [[ -n "$map" && "$arg" =~ : ]]; then
+                          res="${res}:${map}"
+                      else
+                          res="${res}:$(realpath "${dir}")"
+                      fi
+                  else
+                      res="${arg}"
+                  fi
+                  args=("${args[@]}" "$(printf '%q' "${res}")")
+              else
+                  # append
+                  args=("${args[@]}" "$arg")
+              fi
+              prev_arg="$arg"
+          done
+          # send the remapped volume paths
+          boot2docker::ssh docker "$SHELL_DOCKER_ACTION" "${args[@]}"
+      ;;
+      start|stop|kill)
+          docker-machine::startup
+          boot2docker::ssh docker "$SHELL_DOCKER_ACTION" "$@"
+      ;;
+      build|cp)
+          docker-machine::startup
+          # always try to change the working directory to $PWD
+          boot2docker::ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker "$SHELL_DOCKER_ACTION" "$@"
+      ;;
+      compose)
+          docker-machine::startup
+          # remap working dir
+          # alias docker-compose="docker compose"
+          WORKDIR="/mnt/hgfs$(realpath "$(pwd)")"
+          docker run -it --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd)":"${WORKDIR}" -w "${WORKDIR}" docker/compose:${VERSION_DOCKER_COMPOSE} "$@"
+      ;;
+      *)
+          docker-machine::startup
 
+          # run plugin architecture command instead
+          if type "docker-$SHELL_DOCKER_ACTION" &>/dev/null; then
+              "docker-$SHELL_DOCKER_ACTION" "$@"
+          else
+              # default run docker command on remote host
+              boot2docker::ssh docker "$SHELL_DOCKER_ACTION" $(internal::escape-args "$@")
+          fi
+      ;;
+  esac
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ======================================================================================================================
-# Start of commnds
-# ======================================================================================================================
-
-SHELL_DOCKER_ACTION="$1"
-shift
-case "$SHELL_DOCKER_ACTION" in
-    ssh)
-        boot2docker::ssh "$@"
-    ;;
-    ssh-batch)
-        boot2docker::ssh-batch-mode "$@"
-    ;;
-    curl)
-        curl --insecure --cert "${DOCKER_CERT_PATH}/cert.pem" --key "${DOCKER_CERT_PATH}/key.pem" "$@"
-    ;;
-    vm)
-        SHELL_DOCKER_SUBACTION="$1"
-        shift
-        case "$SHELL_DOCKER_SUBACTION" in
-            build)
-                vmware::create-vm
-                boot2docker::download-iso
-                _docker-vmup
-                _docker-vm-wait-for-tools
-                _docker-vm-init
-            ;;
-            clean)
-                _docker-vm-clean
-            ;;
-            confdir)
-                echo "$DOCKER_CERT_PATH"
-            ;;
-            create)
-                echo -ne "\033[0;34m"
-                vmware::create-vm
-                boot2docker::download-iso
-                echo -ne "\033[0m"
-            ;;
-            destroy)
-                _docker-destroy-vm
-            ;;
-            download)
-                boot2docker::download-iso
-            ;;
-            htop)
-                boot2docker::ssh docker run -it --rm --pid=host jess/htop htop "$@"
-            ;;
-            init)
-                _docker-vm-init
-            ;;
-            poweroff)
-                vmware::vmrun stop hard
-            ;;
-            reboot)
-                _docker-reboot
-                sleep 20
-                _docker-vm-wait-for-tools
-            ;;
-            rebuild)
-                docker vm destroy
-                docker vm build
-            ;;
-            run)
-                vmware::vmrun "$@"
-            ;;
-            *)
-                exit 1
-            ;;
-        esac
-    ;;
-    ip)
-        vmware::ip-addr
-    ;;
-    up)
-        _docker-vmup
-        _docker-vm-wait-for-tools
-    ;;
-    down)
-        _docker-vmdown
-    ;;
-    help)
-        boot2docker::ssh docker help "$@"
-        if [[ $# == 0 ]]; then
-            echo
-            echo 'Additional options for windows docker script:'
-            echo
-            echo '    curl      Make a curl request against the docker api, use https://localhost:2376/'
-            echo '    down      Stop the boot2docker vm'
-            echo '    ip        Get the ip of the boot2docker vm'
-            echo '    ssh       SSH into docker server or run remote commands'
-            echo '    up        Start the boot2docker vm'
-            echo '    vm        Execute actions against the virtual machine, subactions:'
-            echo '    ├ build       Create and initialize the boot2docker vm'
-            echo '    ├ clean       Remove unused docker images and containers. Use -a to remove stopped containers'
-            echo '    ├ create      Create the boot2docker vm'
-            echo '    ├ destroy     Destroy the boot2docker vm'
-            echo '    ├ download    Download the latest boot2docker.iso'
-            echo '    ├ htop        Run htop in the boot2docker vm'
-            echo '    ├ init        Initialize the boot2docker vm'
-            echo '    ├ poweroff    Power off the boot2docker vm'
-            echo '    ├ reboot      Reboot the boot2docker vm'
-            echo '    ├ rebuild     Recreate and initialize the boot2docker vm'
-            echo '    └ run         Run a vmware command against boot2docker vm'
-        fi
-    ;;
-    run)
-        _docker-startup
-        args=( )
-        prev_arg=
-
-        # generate a persistent history file
-        args=("${args[@]}" "-e" "HISTFILE=/root/.bash_history")
-        args=("${args[@]}" "-e" "$(printf '%q' "HISTIGNORE=${HISTIGNORE}")")
-        args=("${args[@]}" "-e" "$(printf '%q' "HISTCONTROL=${HISTCONTROL}")")
-        args=("${args[@]}" "-e" "HISTSIZE=${HISTSIZE}")
-        args=("${args[@]}" "-e" "HISTFILESIZE=${HISTFILESIZE}")
-        args=("${args[@]}" "-e" "$(printf '%q' "PROMPT_COMMAND=history -a")")
-        args=("${args[@]}" "-e" "$(printf '%q' "PS1=$(_docker-ps1)")")
-        args=("${args[@]}" "-e" "$(printf '%q' "PS2=$(echo -e "\xe2\x86\x92") ")")
-        args=("${args[@]}" "-v" "$(printf '%q' "/mnt/hgfs$(realpath "$HOME")/.docker/.docker_history:/root/.bash_history")")
-
-        # process mounts
-        for arg in "$@"; do
-            # if argument is a file, then expand it to windows paths
-            if [[ "$prev_arg" == '-v' ]]; then
-                # docker doesn't support -vPATH:PATH only -v PATH:PATH
-                # previous arg was a volume indicator
-                dir="$(echo "${arg}" | cut -d':' -f1)"
-                if [[ -e "$dir" && "$(realpath "${dir}")" =~ ^/[a-z]/ && "$dir" != /tmp* ]]; then
-                    map="$(echo "${arg}" | cut -d':' -f2)"
-                    res="/mnt/hgfs$(realpath "${dir}")"
-                    if [[ -n "$map" && "$arg" =~ : ]]; then
-                        res="${res}:${map}"
-                    else
-                        res="${res}:$(realpath "${dir}")"
-                    fi
-                else
-                    res="${arg}"
-                fi
-                args=("${args[@]}" "$(printf '%q' "${res}")")
-            else
-                # append
-                args=("${args[@]}" "$arg")
-            fi
-            prev_arg="$arg"
-        done
-        # send the remapped volume paths
-        boot2docker::ssh docker "$SHELL_DOCKER_ACTION" "${args[@]}"
-    ;;
-    start|stop|kill)
-        _docker-startup
-        boot2docker::ssh docker "$SHELL_DOCKER_ACTION" "$@"
-    ;;
-    build|cp)
-        _docker-startup
-        # always try to change the working directory to $PWD
-        boot2docker::ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker "$SHELL_DOCKER_ACTION" "$@"
-    ;;
-    compose)
-        _docker-startup
-        # remap working dir
-        # alias docker-compose="docker compose"
-        WORKDIR="/mnt/hgfs$(realpath "$(pwd)")"
-        docker run -it --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd)":"${WORKDIR}" -w "${WORKDIR}" docker/compose:${VERSION_DOCKER_COMPOSE} "$@"
-    ;;
-    *)
-        _docker-startup
-
-        # run plugin architecture command instead
-        if type "docker-$SHELL_DOCKER_ACTION" &>/dev/null; then
-            "docker-$SHELL_DOCKER_ACTION" "$@"
-        else
-            # default run docker command on remote host
-            boot2docker::ssh docker "$SHELL_DOCKER_ACTION" $(_docker-escape-args "$@")
-        fi
-    ;;
-esac
+#==============================================================================
+# Run Script
+#==============================================================================
+main "$@"
