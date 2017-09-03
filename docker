@@ -24,11 +24,11 @@ VERSION_DOCKER_COMPOSE="1.16.1"
 
 # vmware info
 if [[ "$(uname -m)" == "x86_64" ]]; then
-    VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
-    VMFSTOOLS_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmware-vdiskmanager.exe'
+  VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
+  VMFSTOOLS_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmware-vdiskmanager.exe'
 else
-    VMRUN_BIN='C:\Program Files\VMware\VMware Workstation\vmrun.exe'
-    VMFSTOOLS_BIN='C:\Program Files\VMware\VMware Workstation\vmware-vdiskmanager.exe'
+  VMRUN_BIN='C:\Program Files\VMware\VMware Workstation\vmrun.exe'
+  VMFSTOOLS_BIN='C:\Program Files\VMware\VMware Workstation\vmware-vdiskmanager.exe'
 fi
 
 # storage
@@ -58,7 +58,7 @@ function internal::escape-args() {
   fi
   local args=( )
   for arg in "$@"; do
-    args=("${args[@]}" $(printf '%q' "$arg"))
+    args+=( $(printf '%q' "$arg") )
   done
   echo "${args[@]}"
 }
@@ -421,6 +421,55 @@ function boot2docker::get() {
 #==============================================================================
 # docker functions
 #==============================================================================
+function docker::cmd() {
+  # always try to change the working directory to $PWD
+  boot2docker::ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null\ \|\|\ true\ \; docker $(internal::escape-args "$@")
+}
+
+function docker::run() {
+  local args=( )
+  local prev_arg=""
+  local arg dir map res
+
+  # generate a persistent history file
+  args+=( "-e" "HISTFILE=/root/.bash_history" )
+  args+=( "-e" "HISTIGNORE=${HISTIGNORE}" )
+  args+=( "-e" "HISTCONTROL=${HISTCONTROL}" )
+  args+=( "-e" "HISTSIZE=${HISTSIZE}" )
+  args+=( "-e" "HISTFILESIZE=${HISTFILESIZE}" )
+  args+=( "-e" "PROMPT_COMMAND=history -a" )
+  args+=( "-e" "PS1=$(internal::custom-ps1)" )
+  args+=( "-e" "PS2=$(echo -e "\xe2\x86\x92") " )
+  args+=( "-v" "/mnt/hgfs$(realpath "${HOME}")/.docker/.docker_history:/root/.bash_history" )
+
+  # process mounts
+  for arg in "$@"; do
+    # if argument is a file, then expand it to windows paths
+    if [[ "${prev_arg}" == '-v' ]]; then
+      # docker doesn't support -vPATH:PATH only -v PATH:PATH
+      # previous arg was a volume indicator
+      dir="$(echo "${arg}" | cut -d':' -f1)"
+      if [[ -e "${dir}" && "$(realpath "${dir}")" =~ ^/[a-z]/ && "${dir}" != /tmp* ]]; then
+        map="$(echo "${arg}" | cut -d':' -f2)"
+        res="/mnt/hgfs$(realpath "${dir}")"
+        if [[ -n "${map}" && "${arg}" =~ : ]]; then
+          res="${res}:${map}"
+        else
+          res="${res}:$(realpath "${dir}")"
+        fi
+      else
+        res="${arg}"
+      fi
+      args+=( "${res}" )
+    else
+      # append
+      args+=( "${arg}" )
+    fi
+    prev_arg="${arg}"
+  done
+  # send the remapped volume paths
+  docker::cmd run "${args[@]}"
+}
 
 #==============================================================================
 # docker-compose functions
@@ -472,7 +521,76 @@ function docker-machine::startup() {
 #==============================================================================
 # Entrypoint
 #==============================================================================
-function main() {
+function main::docker() {
+  local SHELL_DOCKER_ACTION="$1"
+  shift
+  case "${SHELL_DOCKER_ACTION}" in
+    run)
+      # send the remapped volume paths
+      docker::run "$@"
+    ;;
+    *)
+      # run plugin architecture command instead
+      if type "docker-${SHELL_DOCKER_ACTION}" &>/dev/null; then
+        "docker-${SHELL_DOCKER_ACTION}" "$@"
+        return $?
+      fi
+
+      # default run docker command on remote host
+      docker::cmd "${SHELL_DOCKER_ACTION}" "$@"
+    ;;
+  esac
+}
+
+# mostly copied from https://github.com/docker/compose/tree/master/script/run
+function main::docker-compose() {
+  # Only allocate tty if we detect one
+  local DOCKER_RUN_OPTIONS=""
+  if [ -t 1 ]; then
+    DOCKER_RUN_OPTIONS="${DOCKER_RUN_OPTIONS} -t"
+  fi
+  if [ -t 0 ]; then
+    DOCKER_RUN_OPTIONS="${DOCKER_RUN_OPTIONS} -i"
+  fi
+
+  # set up docker socket
+  local DOCKER_ADDR="-v /var/run/docker.sock:/var/run/docker.sock -e DOCKER_HOST=/var/run/docker.sock"
+
+  # Setup volume mounts for compose config and context
+  local VOLUMES=( )
+  local WORKDIR="$(realpath "$(pwd)")"
+  if [ "$(pwd)" != '/' ]; then
+    VOLUMES+=( -v "${WORKDIR}:/mnt/hgfs${WORKDIR}" )
+  fi
+
+  local COMPOSE_DIR=""
+  local COMPOSE_OPTIONS="${COMPOSE_OPTIONS:-}"
+  if [ -n "${COMPOSE_FILE:-}" ]; then
+    COMPOSE_OPTIONS="${COMPOSE_OPTIONS} -e COMPOSE_FILE=${COMPOSE_FILE}"
+    COMPOSE_DIR="$(realpath $(dirname "${COMPOSE_FILE}"))"
+  fi
+  # TODO: also check --file argument
+  if [[ -n "${COMPOSE_DIR}" ]] && [[ "${COMPOSE_DIR}" != "${WORKDIR}" ]]; then
+    VOLUMES+=( -v "${COMPOSE_DIR}:/mnt/hgfs${COMPOSE_DIR}")
+  fi
+  if [ -n "${HOME:-}" ]; then
+    local HOME_DIR="$(realpath "${HOME}")"
+    VOLUMES+=( -v "${HOME_DIR}:/mnt/hgfs${HOME_DIR}" -v "${HOME_DIR}:/root") # mount $HOME in /root to share docker.config
+  fi
+
+  # remap working dir
+  exec docker run --rm \
+    ${DOCKER_RUN_OPTIONS} \
+    ${DOCKER_ADDR} \
+    ${COMPOSE_OPTIONS} \
+    "${VOLUMES[@]}" \
+    -w "/mnt/hgfs${WORKDIR}" \
+    docker/compose:${VERSION_DOCKER_COMPOSE} \
+      "$@"
+}
+
+function main::docker-machine() {
+  echo "$@"
   local SHELL_DOCKER_ACTION="$1"
   shift
   case "$SHELL_DOCKER_ACTION" in
@@ -575,77 +693,41 @@ function main() {
               echo '    └ run         Run a vmware command against boot2docker vm'
           fi
       ;;
-      run)
-          docker-machine::startup
-          args=( )
-          prev_arg=
+  esac
+}
 
-          # generate a persistent history file
-          args=("${args[@]}" "-e" "HISTFILE=/root/.bash_history")
-          args=("${args[@]}" "-e" "$(printf '%q' "HISTIGNORE=${HISTIGNORE}")")
-          args=("${args[@]}" "-e" "$(printf '%q' "HISTCONTROL=${HISTCONTROL}")")
-          args=("${args[@]}" "-e" "HISTSIZE=${HISTSIZE}")
-          args=("${args[@]}" "-e" "HISTFILESIZE=${HISTFILESIZE}")
-          args=("${args[@]}" "-e" "$(printf '%q' "PROMPT_COMMAND=history -a")")
-          args=("${args[@]}" "-e" "$(printf '%q' "PS1=$(internal::custom-ps1)")")
-          args=("${args[@]}" "-e" "$(printf '%q' "PS2=$(echo -e "\xe2\x86\x92") ")")
-          args=("${args[@]}" "-v" "$(printf '%q' "/mnt/hgfs$(realpath "$HOME")/.docker/.docker_history:/root/.bash_history")")
+function main() {
+  local SCRIPT="$(basename "${SELF}")"
+  local ENTRYPOINT
 
-          # process mounts
-          for arg in "$@"; do
-              # if argument is a file, then expand it to windows paths
-              if [[ "$prev_arg" == '-v' ]]; then
-                  # docker doesn't support -vPATH:PATH only -v PATH:PATH
-                  # previous arg was a volume indicator
-                  dir="$(echo "${arg}" | cut -d':' -f1)"
-                  if [[ -e "$dir" && "$(realpath "${dir}")" =~ ^/[a-z]/ && "$dir" != /tmp* ]]; then
-                      map="$(echo "${arg}" | cut -d':' -f2)"
-                      res="/mnt/hgfs$(realpath "${dir}")"
-                      if [[ -n "$map" && "$arg" =~ : ]]; then
-                          res="${res}:${map}"
-                      else
-                          res="${res}:$(realpath "${dir}")"
-                      fi
-                  else
-                      res="${arg}"
-                  fi
-                  args=("${args[@]}" "$(printf '%q' "${res}")")
-              else
-                  # append
-                  args=("${args[@]}" "$arg")
-              fi
-              prev_arg="$arg"
-          done
-          # send the remapped volume paths
-          boot2docker::ssh docker "$SHELL_DOCKER_ACTION" "${args[@]}"
-      ;;
-      start|stop|kill)
-          docker-machine::startup
-          boot2docker::ssh docker "$SHELL_DOCKER_ACTION" "$@"
-      ;;
-      build|cp)
-          docker-machine::startup
-          # always try to change the working directory to $PWD
-          boot2docker::ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null \; docker "$SHELL_DOCKER_ACTION" "$@"
-      ;;
-      compose)
-          docker-machine::startup
-          # remap working dir
-          # alias docker-compose="docker compose"
-          WORKDIR="/mnt/hgfs$(realpath "$(pwd)")"
-          docker run -it --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd)":"${WORKDIR}" -w "${WORKDIR}" docker/compose:${VERSION_DOCKER_COMPOSE} "$@"
-      ;;
-      *)
-          docker-machine::startup
+  case "${SCRIPT}" in
+    docker-compose)
+      ENTRYPOINT=compose
+    ;;
+    docker-machine)
+      ENTRYPOINT=machine
+    ;;
+    *)
+      ENTRYPOINT=docker
+      case "$1" in
+        compose|machine)
+          ENTRYPOINT="$1"
+          shift
+        ;;
+      esac
+    ;;
+  esac
 
-          # run plugin architecture command instead
-          if type "docker-$SHELL_DOCKER_ACTION" &>/dev/null; then
-              "docker-$SHELL_DOCKER_ACTION" "$@"
-          else
-              # default run docker command on remote host
-              boot2docker::ssh docker "$SHELL_DOCKER_ACTION" $(internal::escape-args "$@")
-          fi
-      ;;
+  case "${ENTRYPOINT}" in
+    compose)
+      main::docker-compose "$@"
+    ;;
+    machine)
+      main::docker-machine "$@"
+    ;;
+    *)
+      main::docker "$@"
+    ;;
   esac
 }
 
