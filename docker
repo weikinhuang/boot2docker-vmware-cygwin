@@ -18,6 +18,7 @@ LATEST_BOOT2DOCKER_TAG="v17.05.0-ce"
 LATEST_DOCKER_COMPOSE_TAG="1.13.0"
 DOCKER_USER_PASSWD=tcuser
 DOCKER_CONFIG_HOME="$HOME/.docker"
+DOCKER_DAEMON_OPTS="${DOCKER_DAEMON_OPTS:-}"
 
 # make the docker home workdir
 if [[ ! -d "$DOCKER_CONFIG_HOME" ]]; then
@@ -326,7 +327,7 @@ sudo chmod 755 /mnt/sda1/var/lib/boot2docker/bootlocal.sh
 sudo tee /mnt/sda1/var/lib/boot2docker/profile << BOOT2DOCKER_PROFILE_SCRIPT
 #!/bin/sh
 
-EXTRA_ARGS="--insecure-registry localhost"
+EXTRA_ARGS="--insecure-registry localhost ${DOCKER_DAEMON_OPTS}"
 
 BOOT2DOCKER_PROFILE_SCRIPT
 
