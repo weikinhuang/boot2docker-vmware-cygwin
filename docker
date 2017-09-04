@@ -644,20 +644,21 @@ function main::docker() {
 # mostly copied from https://github.com/docker/compose/tree/master/script/run
 function main::docker-compose() {
   # Only allocate tty if we detect one
-  local DOCKER_RUN_OPTIONS=""
+  local DOCKER_RUN_OPTIONS=( )
   if [ -t 1 ]; then
-    DOCKER_RUN_OPTIONS="${DOCKER_RUN_OPTIONS} -t"
+    DOCKER_RUN_OPTIONS+=( -t )
   fi
   if [ -t 0 ]; then
-    DOCKER_RUN_OPTIONS="${DOCKER_RUN_OPTIONS} -i"
+    DOCKER_RUN_OPTIONS+=( -i )
   fi
-
-  # set up docker socket
-  local DOCKER_ADDR="-v /var/run/docker.sock:/var/run/docker.sock -e DOCKER_HOST=/var/run/docker.sock"
 
   # Setup volume mounts for compose config and context
   local VOLUMES=( )
   local WORKDIR="$(realpath "$(pwd)")"
+
+  # set up docker socket
+  VOLUMES+=( -v /var/run/docker.sock:/var/run/docker.sock )
+
   if [ "$(pwd)" != '/' ]; then
     VOLUMES+=( -v "${WORKDIR}:/mnt/hgfs${WORKDIR}" )
   fi
@@ -680,8 +681,7 @@ function main::docker-compose() {
 
   # remap working dir
   docker::run --rm \
-    ${DOCKER_RUN_OPTIONS} \
-    ${DOCKER_ADDR} \
+    "${DOCKER_RUN_OPTIONS[@]}" \
     ${COMPOSE_OPTIONS} \
     "${VOLUMES[@]}" \
     -w "/mnt/hgfs${WORKDIR}" \
