@@ -39,8 +39,8 @@ DOCKER_CONFIG_HOME="${HOME}/.docker"
 #==============================================================================
 MACHINE_STORAGE_PATH="${MACHINE_STORAGE_PATH:-"$(cygpath --mydocs)/Virtual Machines"}"
 DOCKER_MACHINE_NAME="${DOCKER_MACHINE_NAME:-default}"
-DOCKER_MACHINE_VMPATH="$(cygpath -w "$(realpath "${MACHINE_STORAGE_PATH}")")"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'\boot2docker.vmx'
-DOCKER_MACHINE_VMDKPATH="$(cygpath -w "$(realpath "${MACHINE_STORAGE_PATH}")")"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'\boot2docker.vmdk'
+DOCKER_MACHINE_VMPATH="$(cygpath -w "$(realpath "${MACHINE_STORAGE_PATH}")")"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'.vmx'
+DOCKER_MACHINE_VMDKPATH="$(cygpath -w "$(realpath "${MACHINE_STORAGE_PATH}")")"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'.vmdk'
 DOCKER_MACHINE_VMDIR="$(dirname "$(cygpath "${DOCKER_MACHINE_VMPATH}")")"
 DOCKER_CERT_PATH="${DOCKER_MACHINE_VMDIR}"
 
@@ -147,17 +147,20 @@ function vmware::create-vm() {
   # allow differently sized vms
   local VMDK_SIZE="${VMDK_SIZE-16GB}"
   local VMEM_SIZE="${VMEM_SIZE-2048}"
-  local VMX_FILE="${DOCKER_MACHINE_VMDIR}/boot2docker.vmx"
+  local VMX_FILE="${DOCKER_MACHINE_VMDIR}/boot2docker-${DOCKER_MACHINE_NAME}.vmx"
 
   mkdir -p "${DOCKER_MACHINE_VMDIR}"
 
   # generate the vmx file
   vmware::generate-vmx > "${VMX_FILE}"
   # generate the vmdk disk
-  ( cd "${DOCKER_MACHINE_VMDIR}"; "$(cygpath -u "${VMFSTOOLS_BIN}")" -c -s "${VMDK_SIZE}" -a lsilogic -t 0 boot2docker.vmdk )
+  ( cd "${DOCKER_MACHINE_VMDIR}"; "$(cygpath -u "${VMFSTOOLS_BIN}")" -c -s "${VMDK_SIZE}" -a lsilogic -t 0 "boot2docker-${DOCKER_MACHINE_NAME}.vmdk" )
 
   # set display name
   sed -i 's/displayName = "boot2docker"/displayName = "boot2docker-'${DOCKER_MACHINE_NAME}'"/' "${VMX_FILE}"
+  sed -i 's/scsi0:0.fileName = "boot2docker.vmdk"/scsi0:0.fileName = "boot2docker-'${DOCKER_MACHINE_NAME}'.vmdk"/' "${VMX_FILE}"
+  sed -i 's/nvram = "boot2docker.nvram"/nvram = "boot2docker-'${DOCKER_MACHINE_NAME}'.nvram"/' "${VMX_FILE}"
+  sed -i 's/extendedConfigFile = "boot2docker.vmxf"/extendedConfigFile = "boot2docker-'${DOCKER_MACHINE_NAME}'.vmxf"/' "${VMX_FILE}"
 
   # allow access to all cores
   local PROC_CORES=$(grep "^processor" -c /proc/cpuinfo)
@@ -238,7 +241,7 @@ function vmware::shrink() {
   echo -ne "\033[0m"
 }
 
-function _docker-vm-init () {
+function vmware::init-machine() {
   # http://odewahn.github.io/docker-jumpstart/boot2docker.html
   # http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
 
@@ -395,7 +398,7 @@ function boot2docker::host() {
     echo "${DOCKER_IP:-}"
     return 0
   fi
-  echo $(vmware::ip-addr)
+  vmware::ip-addr
 }
 
 function boot2docker::ssh() {
@@ -479,12 +482,15 @@ function docker::run() {
 # docker-machine functions
 #==============================================================================
 function docker-machine::rm() {
-  vmware::vmrun stop hard || true
+  docker-machine::kill || true
   rm -rf "${DOCKER_MACHINE_VMDIR}"
 }
 
 function docker-machine::start() {
-  vmware::vmrun start nogui
+  if ! docker-machine::is-on; then
+    vmware::vmrun start nogui
+    vmware::wait-for-tools
+  fi
 }
 
 function docker-machine::stop() {
@@ -507,15 +513,72 @@ function docker-machine::status() {
   fi
 }
 
-function docker-machine::restart() {
+function docker-machine::reboot() {
   boot2docker::ssh sudo reboot
 }
 
-function docker-machine::startup() {
+function docker-machine::exists() {
+  local machine="$1"
+  test -e "$(realpath "${MACHINE_STORAGE_PATH}")/boot2docker-${machine}/boot2docker-${DOCKER_MACHINE_NAME}.vmx"
+}
+
+
+#env|kill|ip|restart|rm|ssh|start|status|stop
+function docker-machine::env() {
   if ! docker-machine::is-on; then
-    docker-machine::start
-    vmware::wait-for-tools
+    echo "No active host found" 1>&2
+    return 1
   fi
+  echo 'export DOCKER_TLS_VERIFY="1"'
+  echo 'export DOCKER_HOST="tcp://'$(docker-machine::ip)':2376"'
+  echo 'export DOCKER_IP="'$(docker-machine::ip)'"'
+  echo 'export DOCKER_CERT_PATH="'${DOCKER_CERT_PATH}'"'
+  echo 'export DOCKER_MACHINE_NAME="'${DOCKER_MACHINE_NAME}'"'
+  echo '# Run this command to configure your shell:'
+  echo '# eval $(docker-machine env dev)'
+}
+
+function docker-machine::htop() {
+  docker::run -it --rm --pid=host jess/htop htop "$@"
+}
+
+function docker-machine::kill() {
+  vmware::vmrun stop hard
+}
+
+function docker-machine::ip() {
+  vmware::ip-addr
+}
+
+function docker-machine::restart() {
+  docker-machine::reboot
+  sleep 20
+  vmware::wait-for-tools
+}
+
+function docker-machine::run() {
+  vmware::vmrun "$@"
+}
+
+function docker-machine::shrink() {
+  vmware::shrink
+}
+
+function docker-machine::ssh() {
+  boot2docker::ssh "$@"
+}
+
+function docker-machine::create() {
+  local machine="${1:-}"
+  if [[ -z "${machine}" ]] || docker-machine::exists "${machine}"; then
+    echo "Docker machine '${machine}' exists!" 1>&2
+    return 1
+  fi
+  vmware::create-vm
+  boot2docker::download-iso
+  docker-machine::start
+  vmware::wait-for-tools
+  vmware::init-machine
 }
 
 #==============================================================================
@@ -579,7 +642,7 @@ function main::docker-compose() {
   fi
 
   # remap working dir
-  exec docker run --rm \
+  docker::run --rm \
     ${DOCKER_RUN_OPTIONS} \
     ${DOCKER_ADDR} \
     ${COMPOSE_OPTIONS} \
@@ -590,109 +653,37 @@ function main::docker-compose() {
 }
 
 function main::docker-machine() {
-  echo "$@"
-  local SHELL_DOCKER_ACTION="$1"
+  local ACTION="$1"
   shift
-  case "$SHELL_DOCKER_ACTION" in
-      ssh)
-          boot2docker::ssh "$@"
-      ;;
-      ssh-batch)
-          boot2docker::ssh-batch-mode "$@"
-      ;;
-      curl)
-          curl --insecure --cert "${DOCKER_CERT_PATH}/cert.pem" --key "${DOCKER_CERT_PATH}/key.pem" "$@"
-      ;;
-      vm)
-          SHELL_DOCKER_SUBACTION="$1"
-          shift
-          case "$SHELL_DOCKER_SUBACTION" in
-              build)
-                  vmware::create-vm
-                  boot2docker::download-iso
-                  docker-machine::start
-                  vmware::wait-for-tools
-                  _docker-vm-init
-              ;;
-              clean)
-                  vmware::shrink
-              ;;
-              confdir)
-                  echo "$DOCKER_CERT_PATH"
-              ;;
-              create)
-                  echo -ne "\033[0;34m"
-                  vmware::create-vm
-                  boot2docker::download-iso
-                  echo -ne "\033[0m"
-              ;;
-              destroy)
-                  docker-machine::rm
-              ;;
-              download)
-                  boot2docker::download-iso
-              ;;
-              htop)
-                  boot2docker::ssh docker run -it --rm --pid=host jess/htop htop "$@"
-              ;;
-              init)
-                  _docker-vm-init
-              ;;
-              poweroff)
-                  vmware::vmrun stop hard
-              ;;
-              reboot)
-                  docker-machine::restart
-                  sleep 20
-                  vmware::wait-for-tools
-              ;;
-              rebuild)
-                  docker vm destroy
-                  docker vm build
-              ;;
-              run)
-                  vmware::vmrun "$@"
-              ;;
-              *)
-                  exit 1
-              ;;
-          esac
-      ;;
-      ip)
-          vmware::ip-addr
-      ;;
-      up)
-          docker-machine::start
-          vmware::wait-for-tools
-      ;;
-      down)
-          docker-machine::stop
-      ;;
-      help)
-          boot2docker::ssh docker help "$@"
-          if [[ $# == 0 ]]; then
-              echo
-              echo 'Additional options for windows docker script:'
-              echo
-              echo '    curl      Make a curl request against the docker api, use https://localhost:2376/'
-              echo '    down      Stop the boot2docker vm'
-              echo '    ip        Get the ip of the boot2docker vm'
-              echo '    ssh       SSH into docker server or run remote commands'
-              echo '    up        Start the boot2docker vm'
-              echo '    vm        Execute actions against the virtual machine, subactions:'
-              echo '    ├ build       Create and initialize the boot2docker vm'
-              echo '    ├ clean       Remove unused docker images and containers. Use -a to remove stopped containers'
-              echo '    ├ create      Create the boot2docker vm'
-              echo '    ├ destroy     Destroy the boot2docker vm'
-              echo '    ├ download    Download the latest boot2docker.iso'
-              echo '    ├ htop        Run htop in the boot2docker vm'
-              echo '    ├ init        Initialize the boot2docker vm'
-              echo '    ├ poweroff    Power off the boot2docker vm'
-              echo '    ├ reboot      Reboot the boot2docker vm'
-              echo '    ├ rebuild     Recreate and initialize the boot2docker vm'
-              echo '    └ run         Run a vmware command against boot2docker vm'
-          fi
-      ;;
+
+  case "${ACTION}" in
+    active)
+      if [[ -z "${DOCKER_MACHINE_NAME}" ]]; then
+        echo "No active host found" 1>&2
+        return 1
+      fi
+      echo "${DOCKER_MACHINE_NAME}"
+    ;;
+    create)
+      docker-machine::create "$@"
+    ;;
+    env|htop|kill|ip|restart|rm|run|shrink|ssh|start|status|stop)
+      # these take in an optional [machine-name=default]
+      local machine="default"
+      if docker-machine::exists "${1:-}"; then
+        machine="$1"
+        shift
+      fi
+      # delegate back to an internal method with DOCKER_MACHINE_NAME environment variable
+      exec env DOCKER_MACHINE_NAME="${machine}" docker machine "_${ACTION}_" "$@"
+    ;;
+    _env_|_htop_|_kill_|_ip_|_restart_|_rm_|_run_|_shrink_|_ssh_|_start_|_status_|_stop_)
+      local DELEGATED_ACTION="$(echo ${ACTION} | sed 's/^_//' | sed 's/_$//')"
+      docker-machine::${DELEGATED_ACTION} "$@"
+    ;;
+    ls|scp|*)
+      echo "Command '${SHELL_DOCKER_ACTION}' is not implemented!" 1>&2
+    ;;
   esac
 }
 
