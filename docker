@@ -336,7 +336,7 @@ sudo chmod 755 /mnt/sda1/var/lib/boot2docker/bootlocal.sh
 sudo tee /mnt/sda1/var/lib/boot2docker/profile << BOOT2DOCKER_PROFILE_SCRIPT
 #!/bin/sh
 
-EXTRA_ARGS="--insecure-registry localhost ${DOCKER_DAEMON_OPTS:-}"
+EXTRA_ARGS="\\\$EXTRA_ARGS --insecure-registry localhost ${DOCKER_DAEMON_OPTS:-}"
 
 BOOT2DOCKER_PROFILE_SCRIPT
 
@@ -355,6 +355,7 @@ DOCKER_INIT
   sleep 20
   vmware::wait-for-tools
 
+  sleep 15
   echo -e "\033[0;32mPulling ssl certs\033[0m\033[0;34m"
   for file in {ca.pem,cakey.pem,cert.pem,key.pem,server.pem,serverkey.pem,hostnames}; do
     boot2docker::ssh sudo cat "/var/lib/boot2docker/tls/${file}" > "${DOCKER_CERT_PATH}/${file}"
@@ -396,10 +397,6 @@ function boot2docker::download-iso() {
 
 function boot2docker::host() {
   # shortcut to save from reading the machine state
-  if [[ -n "${DOCKER_IP:-}" ]]; then
-    echo "${DOCKER_IP:-}"
-    return 0
-  fi
   vmware::ip-addr
 }
 
@@ -533,7 +530,6 @@ function docker-machine::env() {
   fi
   echo 'export DOCKER_TLS_VERIFY="1"'
   echo 'export DOCKER_HOST="tcp://'$(docker-machine::ip)':2376"'
-  echo 'export DOCKER_IP="'$(docker-machine::ip)'"'
   echo 'export DOCKER_CERT_PATH="'${DOCKER_CERT_PATH}'"'
   echo 'export DOCKER_MACHINE_NAME="'${DOCKER_MACHINE_NAME}'"'
   echo '# Run this command to configure your shell:'
@@ -768,7 +764,18 @@ function main() {
       main::docker-machine "$@"
     ;;
     *)
-      main::docker "$@"
+      # convience shortcut
+      case "${1:-}" in
+        down)
+          main::docker-machine stop default
+        ;;
+        up)
+          main::docker-machine start default
+        ;;
+        *)
+          main::docker "$@"
+        ;;
+      esac
     ;;
   esac
 }
