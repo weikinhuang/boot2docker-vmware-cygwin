@@ -244,6 +244,7 @@ function vmware::shrink() {
 function vmware::init-machine() {
   # http://odewahn.github.io/docker-jumpstart/boot2docker.html
   # http://blog.gnu-designs.com/howto-run-boot2docker-in-vmware-fusion-and-esxi-with-shipyard-to-manage-your-containers/
+  local DOCKER_DAEMON_OPTS="${1:-}"
 
   # generate ssh key
   ssh-keygen -t rsa -N "" -C "SSH for boot2docker ${DOCKER_MACHINE_NAME}" -f "${DOCKER_MACHINE_VMDIR}/docker_id_rsa"
@@ -281,10 +282,7 @@ if ! blkid -c /dev/null | grep boot2docker-data &>/dev/null; then
   echo -ne "\033[0m"
 fi
 
-TCL_REPO_BASE=http://tinycorelinux.net/6.x/x86_64
 WORKING_DIR="\$(pwd)"
-BUILD_DIR="/tczbuild"
-sudo mkdir "\$BUILD_DIR"
 
 echo -e "\033[0;32mBuilding userdata.tar\033[0m"
 
@@ -316,6 +314,8 @@ echo -ne "\033[0m"
 echo -e "\033[0;32mInstalling local boot script and profile\033[0m"
 
 echo -e "\033[0;34m"
+
+echo "boot2docker-$(echo "${DOCKER_MACHINE_NAME}" | sed -E 's/[^a-zA-Z0-9-]//g')" | sudo tee /var/lib/boot2docker/etc/hostname
 
 sudo tee /mnt/sda1/var/lib/boot2docker/bootlocal.sh << BOOT2DOCKER_INIT_SCRIPT
 #!/bin/sh
@@ -356,7 +356,9 @@ DOCKER_INIT
   vmware::wait-for-tools
 
   echo -e "\033[0;32mPulling ssl certs\033[0m\033[0;34m"
-  boot2docker::get '~/.docker/*' "${DOCKER_CERT_PATH}/" || true
+  for file in {ca.pem,cakey.pem,cert.pem,key.pem,server.pem,serverkey.pem,hostnames}; do
+    boot2docker::ssh sudo cat "/var/lib/boot2docker/tls/${file}" > "${DOCKER_CERT_PATH}/${file}"
+  done
   touch "${DOCKER_CONFIG_HOME}/.docker_history"
   echo -ne "\033[0m"
 
@@ -418,7 +420,7 @@ function boot2docker::ssh-batch-mode() {
 function boot2docker::get() {
   local TARGET="$1"
   local DEST="${2-.}"
-  scp -r "${SSH_OPTIONS[@]}" docker@$(boot2docker::host):"${TARGET}" "${DEST}"
+  scp -r "${SSH_OPTIONS[@]}" ${BOOT2DOCKER_USER_USER}@$(boot2docker::host):"${TARGET}" "${DEST}"
 }
 
 #==============================================================================
@@ -519,7 +521,7 @@ function docker-machine::reboot() {
 
 function docker-machine::exists() {
   local machine="$1"
-  test -e "$(realpath "${MACHINE_STORAGE_PATH}")/boot2docker-${machine}/boot2docker-${DOCKER_MACHINE_NAME}.vmx"
+  test -e "$(realpath "${MACHINE_STORAGE_PATH}")/boot2docker-${machine}/boot2docker-${machine}.vmx"
 }
 
 
@@ -569,16 +571,54 @@ function docker-machine::ssh() {
 }
 
 function docker-machine::create() {
-  local machine="${1:-}"
-  if [[ -z "${machine}" ]] || docker-machine::exists "${machine}"; then
-    echo "Docker machine '${machine}' exists!" 1>&2
+  local machine="${DOCKER_MACHINE_NAME}"
+
+  local docker_daemon_opts=( )
+  local key opt optval
+  # process mounts
+  while [[ $# > 0 ]]; do
+    key="${1}"
+    shift
+    case "${key}" in
+      --engine-insecure-registry)
+        docker_daemon_opts+=( "--insecure-registry" "${1}" )
+        shift
+      ;;
+      --engine-label)
+        docker_daemon_opts+=( "--label" "${1}" )
+        shift
+      ;;
+      --engine-opt)
+        opt="$(echo "${1}" | cut -d'=' -f1)"
+        optval="$(echo "${1}" | cut -d'=' -f2-)"
+        docker_daemon_opts+=( "--${opt}" "${optval}" )
+        shift
+      ;;
+      --engine-registry-mirror)
+        docker_daemon_opts+=( "--registry-mirror" "${1}" )
+        shift
+      ;;
+      *)
+        echo "Unknown/not implemented argument '${key}'!" 1>&2
+        return 1
+      ;;
+    esac
+  done
+
+  local IFS=" "
+  docker_daemon_opts_str="${docker_daemon_opts[*]}"
+  IFS=$'\n\t'
+
+  if [[ -z "${DOCKER_MACHINE_NAME}" ]] || docker-machine::exists "${DOCKER_MACHINE_NAME}"; then
+    echo "Docker machine '${DOCKER_MACHINE_NAME}' exists!" 1>&2
     return 1
   fi
+
   vmware::create-vm
   boot2docker::download-iso
   docker-machine::start
   vmware::wait-for-tools
-  vmware::init-machine
+  vmware::init-machine "${docker_daemon_opts_str}"
 }
 
 #==============================================================================
@@ -628,6 +668,7 @@ function main::docker-compose() {
 
   local COMPOSE_DIR=""
   local COMPOSE_OPTIONS="${COMPOSE_OPTIONS:-}"
+  local COMPOSE_FILE="${COMPOSE_FILE:-}"
   if [ -n "${COMPOSE_FILE:-}" ]; then
     COMPOSE_OPTIONS="${COMPOSE_OPTIONS} -e COMPOSE_FILE=${COMPOSE_FILE}"
     COMPOSE_DIR="$(realpath $(dirname "${COMPOSE_FILE}"))"
@@ -665,9 +706,19 @@ function main::docker-machine() {
       echo "${DOCKER_MACHINE_NAME}"
     ;;
     create)
-      docker-machine::create "$@"
+      # these take in an optional [machine-name=default]
+      local machine="default"
+      if [[ ${1:-} != --* ]] && ! docker-machine::exists "${1:-}"; then
+        machine="${1:-default}"
+        shift
+      else
+        echo "Docker machine ${machine} exists!" 1>&2
+        return 1
+      fi
+      # delegate back to an internal method with DOCKER_MACHINE_NAME environment variable
+      exec env DOCKER_MACHINE_NAME="${machine}" docker machine "_${ACTION}_" "$@"
     ;;
-    env|htop|kill|ip|restart|rm|run|shrink|ssh|start|status|stop)
+    create|env|htop|kill|ip|restart|rm|run|shrink|ssh|start|status|stop)
       # these take in an optional [machine-name=default]
       local machine="default"
       if docker-machine::exists "${1:-}"; then
@@ -677,7 +728,7 @@ function main::docker-machine() {
       # delegate back to an internal method with DOCKER_MACHINE_NAME environment variable
       exec env DOCKER_MACHINE_NAME="${machine}" docker machine "_${ACTION}_" "$@"
     ;;
-    _env_|_htop_|_kill_|_ip_|_restart_|_rm_|_run_|_shrink_|_ssh_|_start_|_status_|_stop_)
+    _create_|_env_|_htop_|_kill_|_ip_|_restart_|_rm_|_run_|_shrink_|_ssh_|_start_|_status_|_stop_)
       local DELEGATED_ACTION="$(echo ${ACTION} | sed 's/^_//' | sed 's/_$//')"
       docker-machine::${DELEGATED_ACTION} "$@"
     ;;
