@@ -59,7 +59,7 @@ function internal::escape-args() {
   local args=( )
   for arg in "$@"; do
     # clean up weird windows issue
-    args+=( "$(printf '%q' "$(echo "$arg" | sed 's/\r$//')")" )
+    args+=( "$(printf '%q' "$arg" | sed "s/\\\\r'\$/'/")" )
   done
   echo "${args[@]}"
   # for debugging arguments
