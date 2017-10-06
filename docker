@@ -19,7 +19,7 @@ IFS=$'\n\t'
 SELF="$0"
 
 # docker versions
-VERSION_BOOT2DOCKER="v17.07.0-ce"
+VERSION_BOOT2DOCKER="v17.09.0-ce"
 VERSION_DOCKER_COMPOSE="1.16.1"
 
 # vmware info
@@ -58,9 +58,12 @@ function internal::escape-args() {
   fi
   local args=( )
   for arg in "$@"; do
-    args+=( $(printf '%q' "$arg") )
+    # clean up weird windows issue
+    args+=( "$(printf '%q' "$(echo "$arg" | sed 's/\r$//')")" )
   done
   echo "${args[@]}"
+  # for debugging arguments
+  #echo "${args[@]}" >&2
 }
 
 function internal::custom-ps1() {
