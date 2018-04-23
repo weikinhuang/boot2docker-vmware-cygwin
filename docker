@@ -17,6 +17,7 @@ IFS=$'\n\t'
 # Constants
 #==============================================================================
 SELF="$0"
+SCRIPT_DIR="$(dirname "$(realpath "$SELF")")"
 
 # docker versions
 VERSION_BOOT2DOCKER="v17.09.0-ce"
@@ -77,6 +78,20 @@ function internal::custom-ps1() {
   local PS1_EXIT_STATUS='$(EXIT="$?"; [[ $EXIT -ne 0 ]] && echo -n "(E:${EXIT}) ")'
 
   echo "[${PS1_COLOR_EXIT_ERROR}${PS1_EXIT_STATUS}${PS1_COLOR_RESET}${PS1_COLOR_USER}\u${PS1_COLOR_RESET}@${PS1_COLOR_HOST_SCREEN}docker${PS1_COLOR_RESET}.${PS1_COLOR_HOST}\h${PS1_COLOR_RESET} ${PS1_COLOR_WORK_DIR}\W${PS1_COLOR_RESET}]$(echo -e "\xE2\x99\xAB") "
+}
+
+function internal::include-plugin() {
+  local MACHINE_TYPE="${1}"
+  if [[ -n "${MACHINE_TYPE}" ]] && [[ -e "${SCRIPT_DIR}/plugin-docker-${MACHINE_TYPE}" ]]; then
+    source "${SCRIPT_DIR}/plugin-docker-${MACHINE_TYPE}"
+  fi
+}
+
+function internal::include-plugin-from-machine() {
+  if [[ ! -e "${DOCKER_MACHINE_VMDIR}/machine-type" ]]; then
+    return 0
+  fi
+  internal::include-plugin "$(cat "${DOCKER_MACHINE_VMDIR}/machine-type")"
 }
 
 #==============================================================================
@@ -423,6 +438,12 @@ function boot2docker::get() {
   scp -r "${SSH_OPTIONS[@]}" ${BOOT2DOCKER_USER_USER}@$(boot2docker::host):"${TARGET}" "${DEST}"
 }
 
+function boot2docker::put() {
+  local TARGET="$1"
+  local DEST="${2-.}"
+  scp -r "${SSH_OPTIONS[@]}" "${TARGET}" ${BOOT2DOCKER_USER_USER}@$(boot2docker::host):"${DEST}"
+}
+
 #==============================================================================
 # docker functions
 #==============================================================================
@@ -574,6 +595,7 @@ function docker-machine::create() {
 
   local docker_daemon_opts=( )
   local key opt optval
+  local MACHINE_TYPE=""
   # process mounts
   while [[ $# > 0 ]]; do
     key="${1}"
@@ -597,6 +619,10 @@ function docker-machine::create() {
         docker_daemon_opts+=( "--registry-mirror" "${1}" )
         shift
       ;;
+      --machine-type)
+        MACHINE_TYPE="${1}"
+        shift
+      ;;
       *)
         echo "Unknown/not implemented argument '${key}'!" 1>&2
         return 1
@@ -613,11 +639,19 @@ function docker-machine::create() {
     return 1
   fi
 
-  vmware::create-vm
+  internal::include-plugin "${MACHINE_TYPE}"
+  vmware::create-vm "${docker_daemon_opts_str}"
   boot2docker::download-iso
   docker-machine::start
   vmware::wait-for-tools
   vmware::init-machine "${docker_daemon_opts_str}"
+
+  # mark machine type for future use
+  if [[ -n "${MACHINE_TYPE}" ]] && [[ -e "${SCRIPT_DIR}/plugin-docker-${MACHINE_TYPE}" ]]; then
+    echo "${MACHINE_TYPE}" > "${DOCKER_MACHINE_VMDIR}/machine-type"
+  fi
+
+  echo ""
 }
 
 #==============================================================================
@@ -717,7 +751,7 @@ function main::docker-machine() {
       # delegate back to an internal method with DOCKER_MACHINE_NAME environment variable
       exec env DOCKER_MACHINE_NAME="${machine}" docker machine "_${ACTION}_" "$@"
     ;;
-    create|env|htop|kill|ip|restart|rm|run|shrink|ssh|start|status|stop)
+    env|htop|kill|ip|restart|rm|run|shrink|ssh|start|status|stop)
       # these take in an optional [machine-name=default]
       local machine="default"
       if docker-machine::exists "${1:-}"; then
@@ -728,11 +762,12 @@ function main::docker-machine() {
       exec env DOCKER_MACHINE_NAME="${machine}" docker machine "_${ACTION}_" "$@"
     ;;
     _create_|_env_|_htop_|_kill_|_ip_|_restart_|_rm_|_run_|_shrink_|_ssh_|_start_|_status_|_stop_)
+      internal::include-plugin-from-machine
       local DELEGATED_ACTION="$(echo ${ACTION} | sed 's/^_//' | sed 's/_$//')"
       docker-machine::${DELEGATED_ACTION} "$@"
     ;;
     ls|scp|*)
-      echo "Command '${SHELL_DOCKER_ACTION}' is not implemented!" 1>&2
+      echo "Command '${ACTION}' is not implemented!" 1>&2
     ;;
   esac
 }
@@ -761,6 +796,7 @@ function main() {
 
   case "${ENTRYPOINT}" in
     compose)
+      internal::include-plugin-from-machine
       main::docker-compose "$@"
     ;;
     machine)
@@ -776,6 +812,7 @@ function main() {
           main::docker-machine start default
         ;;
         *)
+          internal::include-plugin-from-machine
           main::docker "$@"
         ;;
       esac

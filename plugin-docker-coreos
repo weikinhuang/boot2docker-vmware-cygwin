@@ -1,0 +1,263 @@
+#!/bin/bash -
+#title              : docker
+#description        : This script emulates docker, docker-compose, and docker-machine on a cygwin based system
+#author             : Wei Kin Huang
+#date               : 2017-09-03
+#version            : 1.0.0
+#usage              : docker [args...]
+#requires           : cygpath, fsutil, ssh, vmrun, vmware-vdiskmanager
+#==============================================================================
+
+#==============================================================================
+# Variables
+#==============================================================================
+# ssh options
+BOOT2DOCKER_USER_USER=core
+
+#==============================================================================
+# Vmware workstation functions
+#==============================================================================
+function vmware::generate-vmx() {
+  cat <<-EOF
+.encoding = "windows-1252"
+config.version = "8"
+logging = "FALSE"
+virtualHW.version = "11"
+numvcpus = "2"
+cpuid.coresPerSocket = "2"
+vcpu.hotadd = "TRUE"
+scsi0.present = "TRUE"
+scsi0.virtualDev = "lsilogic"
+memsize = "2048"
+mem.hotadd = "TRUE"
+mainMem.save.vmem = "FALSE"
+MemTrimRate = "0"
+scsi0:0.present = "TRUE"
+scsi0:0.fileName = "boot2docker.vmdk"
+ethernet0.present = "TRUE"
+ethernet0.connectionType = "nat"
+ethernet0.virtualDev = "vmxnet3"
+ethernet0.wakeOnPcktRcv = "FALSE"
+ethernet0.addressType = "generated"
+pciBridge0.present = "TRUE"
+pciBridge4.present = "TRUE"
+pciBridge4.virtualDev = "pcieRootPort"
+pciBridge4.functions = "8"
+pciBridge5.present = "TRUE"
+pciBridge5.virtualDev = "pcieRootPort"
+pciBridge5.functions = "8"
+pciBridge6.present = "TRUE"
+pciBridge6.virtualDev = "pcieRootPort"
+pciBridge6.functions = "8"
+pciBridge7.present = "TRUE"
+pciBridge7.virtualDev = "pcieRootPort"
+pciBridge7.functions = "8"
+vmci0.present = "TRUE"
+hpet0.present = "TRUE"
+displayName = "boot2docker"
+guestOS = "other26xlinux-64"
+nvram = "boot2docker.nvram"
+virtualHW.productCompatibility = "hosted"
+powerType.powerOff = "soft"
+powerType.powerOn = "hard"
+powerType.suspend = "hard"
+powerType.reset = "hard"
+extendedConfigFile = "boot2docker.vmxf"
+floppy0.present = "FALSE"
+isolation.tools.unity.disable = "TRUE"
+unity.allowCompositingInGuest = "FALSE"
+unity.enableLaunchMenu = "FALSE"
+unity.showBadges = "FALSE"
+unity.showBorders = "FALSE"
+unity.wasCapable = "FALSE"
+sched.mem.pshare.enable = "FALSE"
+EOF
+}
+
+function vmware::create-vm() {
+  # allow differently sized vms
+  local VMDK_SIZE="${VMDK_SIZE-16GB}"
+  local VMEM_SIZE="${VMEM_SIZE-2048}"
+  local VMX_FILE="${DOCKER_MACHINE_VMDIR}/boot2docker-${DOCKER_MACHINE_NAME}.vmx"
+  local DOCKER_DAEMON_OPTS="${1:-}"
+
+  mkdir -p "${DOCKER_MACHINE_VMDIR}"
+
+  # generate the vmx file
+  vmware::generate-vmx > "${VMX_FILE}"
+
+  # set display name
+  sed -i 's/displayName = "boot2docker"/displayName = "boot2docker-'${DOCKER_MACHINE_NAME}'"/' "${VMX_FILE}"
+  sed -i 's/scsi0:0.fileName = "boot2docker.vmdk"/scsi0:0.fileName = "boot2docker-'${DOCKER_MACHINE_NAME}'.vmdk"/' "${VMX_FILE}"
+  sed -i 's/nvram = "boot2docker.nvram"/nvram = "boot2docker-'${DOCKER_MACHINE_NAME}'.nvram"/' "${VMX_FILE}"
+  sed -i 's/extendedConfigFile = "boot2docker.vmxf"/extendedConfigFile = "boot2docker-'${DOCKER_MACHINE_NAME}'.vmxf"/' "${VMX_FILE}"
+
+  # generate the vmdk disk (must happen after creating the vmx file, otherwise error: Failed to analyze snapshot chain '...'
+  rsync -v "${SCRIPT_DIR}/coreos_production_vmware_image.vmdk" "${DOCKER_MACHINE_VMDIR}/boot2docker-${DOCKER_MACHINE_NAME}.vmdk"
+  ( cd "${DOCKER_MACHINE_VMDIR}"; "$(cygpath -u "${VMFSTOOLS_BIN}")" -x "${VMDK_SIZE}" "boot2docker-${DOCKER_MACHINE_NAME}.vmdk" )
+
+  # allow access to all cores
+  local PROC_CORES=$(grep "^processor" -c /proc/cpuinfo)
+  sed -i 's/numvcpus = "[0-9]"/numvcpus = "'${PROC_CORES}'"/' "${VMX_FILE}"
+  sed -i 's/cpuid.coresPerSocket = "[0-9]"/cpuid.coresPerSocket = "'${PROC_CORES}'"/' "${VMX_FILE}"
+  sed -i 's/^memsize = "2048"/memsize = "'${VMEM_SIZE}'"/' "${VMX_FILE}"
+
+  # set up shared folders
+  local COUNTER drive
+  COUNTER=0
+  for drive in $(fsutil fsinfo drives | tr -d '\r' | tr ' ' '\n' | tail -n+3 | head -n-1); do
+    echo 'sharedFolder'${COUNTER}'.present = "TRUE"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.enabled = "TRUE"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.readAccess = "TRUE"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.writeAccess = "TRUE"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.hostPath = "'${drive}'"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.guestName = "'$(echo "${drive}" | cut -d ':' -f 1 | tr '[:upper:]' '[:lower:]')'"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.expiration = "never"' >> "${VMX_FILE}"
+    (( COUNTER += 1 ))
+  done
+  echo 'sharedFolder.maxNum = "'${COUNTER}'"' >> "${VMX_FILE}"
+  echo 'isolation.tools.hgfs.disable = "FALSE"' >> "${VMX_FILE}"
+
+  # generate ssh key
+  ssh-keygen -t rsa -N "" -C "SSH for boot2docker ${DOCKER_MACHINE_NAME}" -f "${DOCKER_MACHINE_VMDIR}/docker_id_rsa"
+  local ID_RSA_PUB="$(cat "${DOCKER_MACHINE_VMDIR}/docker_id_rsa.pub" | tr -d '\n' | cut -d ' ' -f 1,2)"
+
+  CLOUD_CONFIG_DATA="$(cat <<-EOF
+#cloud-config
+
+ssh_authorized_keys:
+  - "${ID_RSA_PUB}"
+
+write_files:
+  - path: /etc/sysctl.d/vm.swappiness.conf
+    content: |
+      vm.swappiness=0
+
+  - path: /etc/systemd/setup-network-guestinfo.sh
+    content: |
+      #!/usr/bin/bash
+
+      /usr/share/oem/bin/vmtoolsd --cmd "info-set guestinfo.b2d.eth0 \$(/usr/bin/ifconfig | /usr/bin/grep ^en -A1 | /usr/bin/awk '/inet /{print substr(\$2,1)}')"
+
+  - path: /etc/systemd/build-open-vm-tools.sh
+    content: |
+      #!/usr/bin/bash
+
+      if docker images open-vm-tools:coreos | grep -q open-vm-tools:coreos; then
+        return 0
+      fi
+
+      mkdir -p /tmp/open-vm-tools-build
+
+      docker build -t open-vm-tools:coreos -f- /tmp/open-vm-tools-build <<DOCKEREOF
+      FROM alpine:latest
+      RUN apk add --no-cache open-vm-tools
+      DOCKEREOF
+
+      rm -rf /tmp/open-vm-tools-build
+
+coreos:
+  update:
+    reboot-strategy: off
+
+  units:
+    - name: update-engine.service
+      command: stop
+      enable: false
+
+    - name: locksmithd.service
+      command: stop
+      enable: false
+
+    - name: systemd-sysctl.service
+      command: restart
+      enable: true
+
+    - name: docker.service
+      command: start
+      enable: true
+      drop-ins:
+        - name: 10-daemon-opts.conf
+          content: |
+            [Service]
+            Environment="DOCKER_OPTS=${DOCKER_DAEMON_OPTS}"
+
+    - name: setup-network-guestinfo.service
+      command: start
+      enable: true
+      content: |
+        [Unit]
+        Description=Set up guest info data for vmware
+        Wants=network.target
+        Requires=docker.service
+        ConditionVirtualization=vmware
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/bin/bash /etc/systemd/setup-network-guestinfo.sh
+        RemainAfterExit=true
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: hgfs-mount.service
+      command: start
+      enable: true
+      content: |
+        [Unit]
+        Description=Mount vmware shared folders
+        Wants=network.target
+        Requires=docker.service
+        ConditionVirtualization=vmware
+
+        [Service]
+        Restart=always
+        RestartSec=10s
+        TimeoutStartSec=0
+
+        Environment=DOCKER_CONFIG=/root/.docker
+        Environment=DOCKER_IMAGE=open-vm-tools:coreos
+        Environment=CONTAINER_NAME=%n
+
+        ExecStartPre=-/usr/bin/mkdir /mnt/hgfs
+        ExecStartPre=/usr/bin/bash /etc/systemd/build-open-vm-tools.sh
+        ExecStartPre=-/bin/docker stop "\${CONTAINER_NAME}"
+        ExecStartPre=-/bin/docker rm "\${CONTAINER_NAME}"
+        ExecStart=/bin/docker run --rm \
+            --name "\${CONTAINER_NAME}" \
+            --privileged \
+            --volume /mnt:/mnt:rshared \
+            "\${DOCKER_IMAGE}" \
+            vmhgfs-fuse -f -o allow_other .host:/ /mnt/hgfs
+
+        [Install]
+        WantedBy=multi-user.target
+EOF
+)"
+CLOUD_CONFIG_DATA_ENCODED="$(echo "${CLOUD_CONFIG_DATA}" | gzip -9 -c | base64 -w0)"
+
+# Update CoreOS VMX to include cloud config data
+# https://github.com/coreos/coreos-cloudinit/blob/master/Documentation/vmware-guestinfo.md
+cat >> "${VMX_FILE}" << __CLOUD_CONFIG_DATA__
+guestinfo.hostname = "boot2docker-${DOCKER_MACHINE_NAME}"
+guestinfo.coreos.config.data = "${CLOUD_CONFIG_DATA_ENCODED}"
+guestinfo.coreos.config.data.encoding = "gzip+base64"
+__CLOUD_CONFIG_DATA__
+
+  # fix cygwin permissions...
+  setfacl -b "${DOCKER_MACHINE_VMDIR}"
+  chmod -R 755 "${DOCKER_MACHINE_VMDIR}"
+  chmod 600 "${DOCKER_MACHINE_VMDIR}/docker_id_rsa"
+  sleep 2
+}
+
+function vmware::init-machine() {
+  return 0
+}
+
+#==============================================================================
+# docker internal functions
+#==============================================================================
+function boot2docker::download-iso() {
+  return 0
+}
