@@ -105,7 +105,7 @@ function vmware::create-vm() {
   # set up shared folders
   local COUNTER drive
   COUNTER=0
-  for drive in $(fsutil fsinfo drives | tr -d '\r' | tr ' ' '\n' | tail -n+3 | head -n-1); do
+  for drive in $(internal::list-fixed-drives); do
     echo 'sharedFolder'${COUNTER}'.present = "TRUE"' >> "${VMX_FILE}"
     echo 'sharedFolder'${COUNTER}'.enabled = "TRUE"' >> "${VMX_FILE}"
     echo 'sharedFolder'${COUNTER}'.readAccess = "TRUE"' >> "${VMX_FILE}"
@@ -245,7 +245,9 @@ guestinfo.coreos.config.data.encoding = "gzip+base64"
 __CLOUD_CONFIG_DATA__
 
   # fix cygwin permissions...
-  setfacl -b "${DOCKER_MACHINE_VMDIR}"
+  if type setfacl &>/dev/null; then
+    setfacl -b "${DOCKER_MACHINE_VMDIR}"
+  fi
   chmod -R 755 "${DOCKER_MACHINE_VMDIR}"
   chmod 600 "${DOCKER_MACHINE_VMDIR}/docker_id_rsa"
   sleep 2

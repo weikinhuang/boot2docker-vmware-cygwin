@@ -36,13 +36,50 @@ fi
 DOCKER_CONFIG_HOME="${HOME}/.docker"
 
 #==============================================================================
+# Translation functions
+#==============================================================================
+IS_WSL="$([[ $(uname -s) == 'Linux' ]] && echo 1 || echo)"
+function internal::_winpath() {
+  if [[ ${IS_WSL} == 1 ]]; then
+    # weird behavior with wslpath where it doesn't detect an already win path
+    if echo "$1" | grep -qiE '^[a-z]:'; then
+      echo "$1"
+    else
+      wslpath -wa "$1"
+    fi
+  else
+    cygpath -wa "$1"
+  fi
+}
+
+function internal::_unixpath() {
+  if [[ ${IS_WSL} == 1 ]]; then
+    # weird behavior with wslpath where it doesn't detect an already unix path
+    if [[ "$1" == /* ]]; then
+      echo "$1"
+    else
+      wslpath -ua "$1"
+    fi
+  else
+    cygpath -ua "$1"
+  fi
+}
+
+function internal::get-documents-dir() {
+  "$(internal::_unixpath c:/)Windows/System32/reg.exe" query "HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" /v Personal \
+    | tr -d '\r' \
+    | grep REG_EXPAND_SZ \
+    | awk '{print $3}'
+}
+
+#==============================================================================
 # Variables
 #==============================================================================
-MACHINE_STORAGE_PATH="${MACHINE_STORAGE_PATH:-"$(cygpath --mydocs)/Virtual Machines"}"
+MACHINE_STORAGE_PATH="${MACHINE_STORAGE_PATH:-"$(internal::_unixpath "$(internal::get-documents-dir)")/Virtual Machines"}"
 DOCKER_MACHINE_NAME="${DOCKER_MACHINE_NAME:-default}"
-DOCKER_MACHINE_VMPATH="$(cygpath -w "$(realpath "${MACHINE_STORAGE_PATH}")")"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'.vmx'
-DOCKER_MACHINE_VMDKPATH="$(cygpath -w "$(realpath "${MACHINE_STORAGE_PATH}")")"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'.vmdk'
-DOCKER_MACHINE_VMDIR="$(dirname "$(cygpath "${DOCKER_MACHINE_VMPATH}")")"
+DOCKER_MACHINE_VMPATH="$(internal::_winpath "$(realpath "${MACHINE_STORAGE_PATH}")")"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'.vmx'
+DOCKER_MACHINE_VMDKPATH="$(internal::_winpath "$(realpath "${MACHINE_STORAGE_PATH}")")"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'.vmdk'
+DOCKER_MACHINE_VMDIR="$(dirname "$(internal::_unixpath "${DOCKER_MACHINE_VMPATH}")")"
 DOCKER_CERT_PATH="${DOCKER_MACHINE_VMDIR}"
 
 # ssh options
@@ -53,6 +90,21 @@ BOOT2DOCKER_USER_PASSWD=tcuser
 #==============================================================================
 # Internal functions
 #==============================================================================
+function internal::list-fixed-drives() {
+  local DRIVES="$("$(internal::_unixpath c:/)Windows/System32/cmd.exe" /c fsutil fsinfo drives \
+    | tr -d '\r' \
+    | tr ' ' '\n' \
+    | tail -n+3 \
+    | head -n-1
+  )"
+  local drive
+  for drive in ${DRIVES}; do
+    if "$(internal::_unixpath c:/)Windows/System32/cmd.exe" /c fsutil fsinfo driveType "${drive}" | grep -q "Fixed Drive"; then
+      echo "${drive}"
+    fi
+  done
+}
+
 function internal::escape-args() {
   if [[ $# == 0 ]]; then
     return
@@ -65,6 +117,15 @@ function internal::escape-args() {
   echo "${args[@]}"
   # for debugging arguments
   #echo "${args[@]}" >&2
+}
+
+function internal::hgfs-path() {
+  local MOUNT_PATH="$(realpath "$1")"
+  # get mount base:
+  local DRIVE_LETTER="$(internal::_winpath "${MOUNT_PATH}" | cut -d':' -f1)"
+  local MOUNT_BASE="$(internal::_unixpath "${DRIVE_LETTER}:/")"
+  local STRIPPED_PATH="$(sed -E "s!^${MOUNT_BASE}!/$(basename "${MOUNT_BASE}")/!" <<< "${MOUNT_PATH}")"
+  echo "/mnt/hgfs${STRIPPED_PATH}"
 }
 
 function internal::custom-ps1() {
@@ -172,7 +233,7 @@ function vmware::create-vm() {
   # generate the vmx file
   vmware::generate-vmx > "${VMX_FILE}"
   # generate the vmdk disk
-  ( cd "${DOCKER_MACHINE_VMDIR}"; "$(cygpath -u "${VMFSTOOLS_BIN}")" -c -s "${VMDK_SIZE}" -a lsilogic -t 0 "boot2docker-${DOCKER_MACHINE_NAME}.vmdk" )
+  ( cd "${DOCKER_MACHINE_VMDIR}"; "$(internal::_unixpath "${VMFSTOOLS_BIN}")" -c -s "${VMDK_SIZE}" -a lsilogic -t 0 "boot2docker-${DOCKER_MACHINE_NAME}.vmdk" )
 
   # set display name
   sed -i 's/displayName = "boot2docker"/displayName = "boot2docker-'${DOCKER_MACHINE_NAME}'"/' "${VMX_FILE}"
@@ -189,7 +250,7 @@ function vmware::create-vm() {
   # set up shared folders
   local COUNTER drive
   COUNTER=0
-  for drive in $(fsutil fsinfo drives | tr -d '\r' | tr ' ' '\n' | tail -n+3 | head -n-1); do
+  for drive in $(internal::list-fixed-drives); do
     echo 'sharedFolder'${COUNTER}'.present = "TRUE"' >> "${VMX_FILE}"
     echo 'sharedFolder'${COUNTER}'.enabled = "TRUE"' >> "${VMX_FILE}"
     echo 'sharedFolder'${COUNTER}'.readAccess = "TRUE"' >> "${VMX_FILE}"
@@ -203,19 +264,23 @@ function vmware::create-vm() {
   echo 'isolation.tools.hgfs.disable = "FALSE"' >> "${VMX_FILE}"
 
   # fix cygwin permissions...
-  setfacl -b "${DOCKER_MACHINE_VMDIR}"
+  if type setfacl &>/dev/null; then
+    setfacl -b "${DOCKER_MACHINE_VMDIR}"
+  fi
   chmod -R 755 "${DOCKER_MACHINE_VMDIR}"
+  chmod 600 "${DOCKER_MACHINE_VMDIR}/docker_id_rsa"
+
   sleep 2
 }
 
 function vmware::vmrun() {
   local VM_CMD=$1
   shift
-  "$(cygpath -u "${VMRUN_BIN}")" -T ws \
+  "$(internal::_unixpath "${VMRUN_BIN}")" -T ws \
     -gu "${BOOT2DOCKER_USER_USER}" \
     -gp "${BOOT2DOCKER_USER_PASSWD}" \
     "${VM_CMD}" \
-    "$(cygpath -w "${DOCKER_MACHINE_VMPATH}")" \
+    "$(internal::_winpath "${DOCKER_MACHINE_VMPATH}")" \
     "$@" \
       | tr -d '\r'
 }
@@ -249,9 +314,9 @@ function vmware::shrink() {
   echo -ne "\033[0m\033[0;32m"
   echo "Shrinking disk"
   echo -ne "\033[0m\033[0;34m"
-  local VMDK_SIZE_OLD=$(du -hs "$(cygpath -u "$DOCKER_MACHINE_VMDKPATH")" | awk '{print $1}')
+  local VMDK_SIZE_OLD=$(du -hs "$(internal::_unixpath "$DOCKER_MACHINE_VMDKPATH")" | awk '{print $1}')
   boot2docker::ssh sudo vmware-toolbox-cmd disk shrink /mnt/sda1
-  local VMDK_SIZE_NEW=$(du -hs "$(cygpath -u "$DOCKER_MACHINE_VMDKPATH")" | awk '{print $1}')
+  local VMDK_SIZE_NEW=$(du -hs "$(internal::_unixpath "$DOCKER_MACHINE_VMDKPATH")" | awk '{print $1}')
   echo -ne "\033[0m"
   echo -e "\033[0;32mOld Size: \033[1;32m${VMDK_SIZE_OLD}\033[0m"
   echo -ne "\033[0m"
@@ -449,7 +514,7 @@ function boot2docker::put() {
 #==============================================================================
 function docker::cmd() {
   # always try to change the working directory to $PWD
-  boot2docker::ssh cd $(printf '%q' "/mnt/hgfs$(realpath "$(pwd)")") \&\>/dev/null\ \|\|\ true\ \; docker $(internal::escape-args "$@")
+  boot2docker::ssh cd $(printf '%q' "$(internal::hgfs-path "$(pwd)")") \&\>/dev/null\ \|\|\ true\ \; docker $(internal::escape-args "$@")
 }
 
 function docker::run() {
@@ -466,7 +531,7 @@ function docker::run() {
   args+=( "-e" "PROMPT_COMMAND=history -a" )
   args+=( "-e" "PS1=$(internal::custom-ps1)" )
   args+=( "-e" "PS2=$(echo -e "\xe2\x86\x92") " )
-  args+=( "-v" "/mnt/hgfs$(realpath "${HOME}")/.docker/.docker_history:/root/.bash_history" )
+  args+=( "-v" "$(internal::hgfs-path "${HOME}")/.docker/.docker_history:/root/.bash_history" )
 
   # process mounts
   for arg in "$@"; do
@@ -475,9 +540,9 @@ function docker::run() {
       # docker doesn't support -vPATH:PATH only -v PATH:PATH
       # previous arg was a volume indicator
       dir="$(echo "${arg}" | cut -d':' -f1)"
-      if [[ -e "${dir}" && "$(realpath "${dir}")" =~ ^/[a-z]/ && "${dir}" != /tmp* ]]; then
+      if [[ -e "${dir}" && -e "$(internal::_unixpath "$(realpath "${dir}")")" && "${dir}" != /tmp* ]]; then
         map="$(echo "${arg}" | cut -d':' -f2)"
-        res="/mnt/hgfs$(realpath "${dir}")"
+        res="$(internal::hgfs-path "${dir}")"
         if [[ -n "${map}" && "${arg}" =~ : ]]; then
           res="${res}:${map}"
         else
@@ -521,10 +586,10 @@ function docker-machine::stop() {
 }
 
 function docker-machine::is-on() {
-  "$(cygpath -u "$VMRUN_BIN")" list \
+  "$(internal::_unixpath "$VMRUN_BIN")" list \
     | tr -d '\r' \
     | sed 's/\\/\//g' \
-    | grep "$(cygpath -w "$DOCKER_MACHINE_VMPATH" | sed 's/\\/\//g')" \
+    | grep "$(internal::_winpath "$DOCKER_MACHINE_VMPATH" | sed 's/\\/\//g')" \
       2>&1 >/dev/null
 }
 
@@ -697,7 +762,7 @@ function main::docker-compose() {
   VOLUMES+=( -v /var/run/docker.sock:/var/run/docker.sock )
 
   if [ "$(pwd)" != '/' ]; then
-    VOLUMES+=( -v "${WORKDIR}:/mnt/hgfs${WORKDIR}" )
+    VOLUMES+=( -v "${WORKDIR}:$(internal::hgfs-path "${WORKDIR}")" )
   fi
 
   local COMPOSE_DIR=""
@@ -709,11 +774,11 @@ function main::docker-compose() {
   fi
   # TODO: also check --file argument
   if [[ -n "${COMPOSE_DIR}" ]] && [[ "${COMPOSE_DIR}" != "${WORKDIR}" ]]; then
-    VOLUMES+=( -v "${COMPOSE_DIR}:/mnt/hgfs${COMPOSE_DIR}")
+    VOLUMES+=( -v "${COMPOSE_DIR}:$(internal::hgfs-path "${COMPOSE_DIR}")")
   fi
   if [ -n "${HOME:-}" ]; then
     local HOME_DIR="$(realpath "${HOME}")"
-    VOLUMES+=( -v "${HOME_DIR}:/mnt/hgfs${HOME_DIR}" -v "${HOME_DIR}:/root") # mount $HOME in /root to share docker.config
+    VOLUMES+=( -v "${HOME_DIR}:$(internal::hgfs-path "${HOME_DIR}")" -v "${HOME_DIR}:/root") # mount $HOME in /root to share docker.config
   fi
 
   # remap working dir
@@ -721,7 +786,7 @@ function main::docker-compose() {
     "${DOCKER_RUN_OPTIONS[@]}" \
     ${COMPOSE_OPTIONS} \
     "${VOLUMES[@]}" \
-    -w "/mnt/hgfs${WORKDIR}" \
+    -w "$(internal::hgfs-path "${WORKDIR}")" \
     docker/compose:${VERSION_DOCKER_COMPOSE} \
       "$@"
 }
