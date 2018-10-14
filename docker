@@ -20,7 +20,7 @@ SELF="$0"
 SCRIPT_DIR="$(dirname "$(realpath "$SELF")")"
 
 # docker versions
-VERSION_BOOT2DOCKER="v18.06.0-ce"
+VERSION_BOOT2DOCKER="v18.06.1-ce"
 VERSION_DOCKER_COMPOSE="1.22.0"
 
 # vmware info
@@ -268,7 +268,6 @@ function vmware::create-vm() {
     setfacl -b "${DOCKER_MACHINE_VMDIR}"
   fi
   chmod -R 755 "${DOCKER_MACHINE_VMDIR}"
-  chmod 600 "${DOCKER_MACHINE_VMDIR}/docker_id_rsa"
 
   sleep 2
 }
@@ -331,6 +330,7 @@ function vmware::init-machine() {
 
   # generate ssh key
   ssh-keygen -t rsa -N "" -C "SSH for boot2docker ${DOCKER_MACHINE_NAME}" -f "${DOCKER_MACHINE_VMDIR}/docker_id_rsa"
+  chmod 600 "${DOCKER_MACHINE_VMDIR}/docker_id_rsa"
 
   local ID_RSA_PUB="$(cat "${DOCKER_MACHINE_VMDIR}/docker_id_rsa.pub")"
 
