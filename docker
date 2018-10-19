@@ -449,6 +449,7 @@ DOCKER_INIT
   for file in {ca.pem,cakey.pem,cert.pem,key.pem,server.pem,serverkey.pem,hostnames}; do
     boot2docker::ssh sudo cat "/var/lib/boot2docker/tls/${file}" > "${DOCKER_CERT_PATH}/${file}"
   done
+  mkdir -p "${DOCKER_CONFIG_HOME}"
   touch "${DOCKER_CONFIG_HOME}/.docker_history"
   echo -ne "\033[0m"
 
@@ -472,6 +473,7 @@ function boot2docker::download-iso() {
 
   # cache iso
   if [[ ! -e "${ISO_CACHE}" ]]; then
+    mkdir -p "${DOCKER_CONFIG_HOME}"
     if ! curl --fail -sSL# "${ISO_URL}" -o "${ISO_CACHE}"; then
       echo "Failed to download!" 1>&2
       return 1
