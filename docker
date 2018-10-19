@@ -65,11 +65,17 @@ function internal::_unixpath() {
   fi
 }
 
+function internal::get-expand-windows-var() {
+  "$(internal::_unixpath c:/)Windows/System32/cmd.exe" /c echo "%$1%" \
+    | tr -d '\r'
+}
+
 function internal::get-documents-dir() {
   "$(internal::_unixpath c:/)Windows/System32/reg.exe" query "HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" /v Personal \
     | tr -d '\r' \
     | grep REG_EXPAND_SZ \
-    | awk '{print $3}'
+    | awk '{print $3}' \
+    | sed "s#%USERPROFILE%#$(internal::get-expand-windows-var USERPROFILE | sed 's/\\/\\\\/g')#"
 }
 
 #==============================================================================
