@@ -446,8 +446,8 @@ DOCKER_INIT
 
   sleep 15
   echo -e "\033[0;32mPulling ssl certs\033[0m\033[0;34m"
-  for file in {ca.pem,cakey.pem,cert.pem,key.pem,server.pem,serverkey.pem,hostnames}; do
-    boot2docker::ssh sudo cat "/var/lib/boot2docker/tls/${file}" > "${DOCKER_CERT_PATH}/${file}"
+  for file in {ca.pem,cert.pem,key.pem}; do
+    boot2docker::ssh cat "~/.docker/${file}" > "${DOCKER_CERT_PATH}/${file}"
   done
   mkdir -p "${DOCKER_CONFIG_HOME}"
   touch "${DOCKER_CONFIG_HOME}/.docker_history"
