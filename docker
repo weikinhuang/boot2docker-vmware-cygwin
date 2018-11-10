@@ -20,7 +20,7 @@ SELF="$0"
 SCRIPT_DIR="$(dirname "$(realpath "$SELF")")"
 
 # docker versions
-VERSION_BOOT2DOCKER="v18.06.1-ce"
+VERSION_BOOT2DOCKER="v18.09.0"
 VERSION_DOCKER_COMPOSE="1.23.1"
 
 # vmware info
