@@ -5,7 +5,7 @@
 #date               : 2017-09-03
 #version            : 1.0.0
 #usage              : docker [args...]
-#requires           : cygpath, fsutil, ssh, vmrun, vmware-vdiskmanager
+#requires           : cygpath/wslpath, fsutil, ssh, vmrun, vmware-vdiskmanager
 #==============================================================================
 
 # Bash safemode
@@ -21,7 +21,7 @@ SCRIPT_DIR="$(dirname "$(realpath "$SELF")")"
 
 # docker versions
 VERSION_BOOT2DOCKER="v18.06.1-ce"
-VERSION_DOCKER_COMPOSE="1.22.0"
+VERSION_DOCKER_COMPOSE="1.23.1"
 
 # vmware info
 if [[ "$(uname -m)" == "x86_64" ]]; then
