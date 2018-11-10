@@ -19,7 +19,7 @@ BOOT2DOCKER_USER_USER=core
 #==============================================================================
 function vmware::generate-vmx() {
   cat <<-EOF
-.encoding = "windows-1252"
+.encoding = "UTF-8"
 config.version = "8"
 logging = "FALSE"
 virtualHW.version = "11"
@@ -93,7 +93,14 @@ function vmware::create-vm() {
   sed -i 's/extendedConfigFile = "boot2docker.vmxf"/extendedConfigFile = "boot2docker-'${DOCKER_MACHINE_NAME}'.vmxf"/' "${VMX_FILE}"
 
   # generate the vmdk disk (must happen after creating the vmx file, otherwise error: Failed to analyze snapshot chain '...'
-  rsync -v "${SCRIPT_DIR}/coreos_production_vmware_image.vmdk" "${DOCKER_MACHINE_VMDIR}/boot2docker-${DOCKER_MACHINE_NAME}.vmdk"
+  COREOS_VMDK_FILE=coreos_production_vmware_image.vmdk
+  if [[ ! -e "${SCRIPT_DIR}/coreos_production_vmware_image.vmdk" ]]; then
+    COREOS_CHANNEL="${COREOS_CHANNEL:-alpha}"
+    COREOS_VMDK_URL=https://${COREOS_CHANNEL}.release.core-os.net/amd64-usr/current/${COREOS_VMDK_FILE}.bz2
+    ( cd "${SCRIPT_DIR}"; wget "${COREOS_VMDK_URL}" )
+    ( cd "${SCRIPT_DIR}"; bunzip2 -v ${COREOS_VMDK_FILE}.bz2 )
+  fi
+  rsync -v "${SCRIPT_DIR}/${COREOS_VMDK_FILE}" "${DOCKER_MACHINE_VMDIR}/boot2docker-${DOCKER_MACHINE_NAME}.vmdk"
   ( cd "${DOCKER_MACHINE_VMDIR}"; "$(internal::_unixpath "${VMFSTOOLS_BIN}")" -x "${VMDK_SIZE}" "boot2docker-${DOCKER_MACHINE_NAME}.vmdk" )
 
   # allow access to all cores
