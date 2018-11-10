@@ -94,7 +94,7 @@ function vmware::create-vm() {
 
   # generate the vmdk disk (must happen after creating the vmx file, otherwise error: Failed to analyze snapshot chain '...'
   rsync -v "${SCRIPT_DIR}/coreos_production_vmware_image.vmdk" "${DOCKER_MACHINE_VMDIR}/boot2docker-${DOCKER_MACHINE_NAME}.vmdk"
-  ( cd "${DOCKER_MACHINE_VMDIR}"; "$(cygpath -u "${VMFSTOOLS_BIN}")" -x "${VMDK_SIZE}" "boot2docker-${DOCKER_MACHINE_NAME}.vmdk" )
+  ( cd "${DOCKER_MACHINE_VMDIR}"; "$(internal::_unixpath "${VMFSTOOLS_BIN}")" -x "${VMDK_SIZE}" "boot2docker-${DOCKER_MACHINE_NAME}.vmdk" )
 
   # allow access to all cores
   local PROC_CORES=$(grep "^processor" -c /proc/cpuinfo)
