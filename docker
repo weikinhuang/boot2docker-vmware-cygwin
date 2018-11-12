@@ -45,7 +45,7 @@ function internal::_winpath() {
     if echo "$1" | grep -qiE '^[a-z]:'; then
       echo "$1"
     else
-      wslpath -wa "$1"
+      wslpath -wa "$1" 2>/dev/null
     fi
   else
     cygpath -wa "$1"
@@ -58,7 +58,7 @@ function internal::_unixpath() {
     if [[ "$1" == /* ]]; then
       echo "$1"
     else
-      wslpath -ua "$1"
+      wslpath -ua "$1" 2>/dev/null
     fi
   else
     cygpath -ua "$1"
@@ -109,6 +109,18 @@ function internal::list-fixed-drives() {
       echo "${drive}"
     fi
   done
+}
+
+function internal::is-win-host-path() {
+  local LOCAL_TARGET="$(realpath "${1}")"
+  local UNIX_DRIVE_PATH
+  for drive in $(internal::list-fixed-drives); do
+    UNIX_DRIVE_PATH="$(internal::_unixpath "${drive}")"
+    if [[ "${LOCAL_TARGET}" == "${UNIX_DRIVE_PATH/%\//}/"* ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 function internal::escape-args() {
@@ -548,7 +560,7 @@ function docker::run() {
       # docker doesn't support -vPATH:PATH only -v PATH:PATH
       # previous arg was a volume indicator
       dir="$(echo "${arg}" | cut -d':' -f1)"
-      if [[ -e "${dir}" && -e "$(internal::_unixpath "$(realpath "${dir}")")" && "${dir}" != /tmp* ]]; then
+      if internal::is-win-host-path "${dir}"; then
         map="$(echo "${arg}" | cut -d':' -f2)"
         res="$(internal::hgfs-path "${dir}")"
         if [[ -n "${map}" && "${arg}" =~ : ]]; then
