@@ -113,8 +113,17 @@ function internal::list-fixed-drives() {
 }
 
 function internal::is-win-host-path() {
-  local LOCAL_TARGET="$(realpath "${1}")"
+  local LOCAL_TARGET
   local UNIX_DRIVE_PATH
+  if [[ ! -e "${1}" ]]; then
+    if [[ "${1}" == /* ]]; then
+      LOCAL_TARGET="${1}"
+    else
+      return 1
+    fi
+  else
+    LOCAL_TARGET="$(realpath "${1}")"
+  fi
   for drive in $(internal::list-fixed-drives); do
     UNIX_DRIVE_PATH="$(internal::_unixpath "${drive}")"
     if [[ "${LOCAL_TARGET}" == "${UNIX_DRIVE_PATH/%\//}/"* ]]; then

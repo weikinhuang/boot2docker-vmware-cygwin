@@ -1,0 +1,288 @@
+#!/bin/bash -
+#title              : docker-localkube
+#description        : This script brings up a kubernetes single host cluster with bootkube on a coreos machine
+#author             : Wei Kin Huang
+#date               : 2018-11-10
+#version            : 1.0.0
+#usage              : docker-localkube [args...]
+#requires           : docker, docker-machine, kubectl
+#===============================================================================
+
+# Bash safemode
+# http://redsymbol.net/articles/unofficial-bash-strict-mode/
+set -euo pipefail
+IFS=$'\n\t'
+
+#===============================================================================
+# Constants
+#===============================================================================
+SELF="$0"
+SCRIPT_DIR="$(dirname "$(realpath "$SELF")")"
+
+# bootkube renderer/provisioner version
+BOOTKUBE_IMAGE=quay.io/coreos/bootkube
+BOOTKUBE_VERSION="${BOOTKUBE_VERSION:-v0.14.0}"
+
+# kubernetes version
+KUBERNETES_VERSION="${KUBERNETES_VERSION:-v1.12.2}"
+
+# etcd data
+ETCD_IMAGE=gcr.io/etcd-development/etcd
+ETCD_VERSION=v3.3.10
+
+#===============================================================================
+# Variables
+#===============================================================================
+if [[ -z "${DOCKER_MACHINE_NAME}" ]]; then
+  echo -e "No docker-machine specified, please run \"\033[0;32meval \$(docker-machine env MACHINE_NAME)\033[0m\"" >&2
+  exit 1
+fi
+
+DOCKER_MACHINE_PATH="$(docker-machine _path "${DOCKER_MACHINE_NAME}")"
+if [[ ! -d "${DOCKER_MACHINE_PATH}" ]]; then
+  echo -e "docker-machine path does not exist" >&2
+  exit 1
+fi
+
+#===============================================================================
+# Internal functions
+#===============================================================================
+function internal::docker-machine::run() {
+  docker-machine ssh "${DOCKER_MACHINE_NAME}" "$@"
+}
+
+function internal::docker-machine::run-sudo() {
+  internal::docker-machine::run sudo "$@"
+}
+
+#===============================================================================
+# localkube internal functions
+#===============================================================================
+function internal::localkube::rendered-k8s-version() {
+  if [[ -d "${DOCKER_MACHINE_PATH}/bootkube/assets/manifests/kube-apiserver.yaml" ]]; then
+    return 1
+  fi
+  grep 'image: k8s.gcr.io/hyperkube:' "${DOCKER_MACHINE_PATH}/bootkube/assets/manifests/kube-apiserver.yaml" | rev | cut -d':' -f1 | rev
+}
+
+function internal::localkube::env() {
+  # build the kubeconfig file with the right ip
+  if [[ ! -e "${DOCKER_MACHINE_PATH}/bootkube/kubeconfig" ]]; then
+    cat "${DOCKER_MACHINE_PATH}/bootkube/assets/auth/kubeconfig" \
+      | sed 's#certificate-authority-data:.*#insecure-skip-tls-verify: true#' \
+      | sed "s#server: https://127.0.0.1:6443#server: https://$(docker-machine ip "${DOCKER_MACHINE_NAME}"):6443#" \
+        > "${DOCKER_MACHINE_PATH}/bootkube/kubeconfig"
+  fi
+
+  echo 'export KUBECONFIG="'"${DOCKER_MACHINE_PATH}"'/bootkube/kubeconfig"'
+  echo '# Run this command to configure your shell:'
+  echo '# eval $('"$(basename "${SELF}")"' env)'
+}
+
+function internal::localkube::rm() {
+internal::docker-machine::run-sudo sh << K8s_CLEANUP
+#!/bin/sh
+set -x
+
+docker stop kubelet || true
+docker stop k8s-etcd || true
+docker ps -a | grep ' k8s_' | awk '{print \$1}' | xargs -r docker kill
+docker ps -a | grep ' k8s_' | awk '{print \$1}' | xargs -r docker rm
+mount | grep /var/lib/kubelet/pods/ | awk '{print \$3}' | xargs -r umount
+rm -rf /var/k8s-etcd
+rm -rf /var/lib/cni/*
+rm -rf /etc/kubernetes/*
+rm -rf /srv/kubernetes/*
+rm -rf /var/log/containers
+rm -rf /var/log/pods
+rm -rf /var/lib/kubelet
+K8s_CLEANUP
+}
+
+function internal::localkube::stop() {
+internal::docker-machine::run-sudo sh << K8s_CLEANUP
+#!/bin/sh
+set -x
+
+docker stop kubelet || true
+docker ps -a | grep ' k8s_' | awk '{print \$1}' | xargs -r docker kill
+docker ps -a | grep ' k8s_' | awk '{print \$1}' | xargs -r docker rm
+mount | grep /var/lib/kubelet/pods/ | awk '{print \$3}' | xargs -r umount
+docker stop k8s-etcd || true
+rm -rf /etc/kubernetes/kube-system-pod-checkpointer-*
+K8s_CLEANUP
+}
+
+function internal::localkube::bootkube::render() {
+  if [[ -d "${DOCKER_MACHINE_PATH}/bootkube" ]]; then
+    return 0
+  fi
+  mkdir -p "${DOCKER_MACHINE_PATH}/bootkube"
+  docker run -it --rm \
+    --name bootkube-render \
+    -v "${DOCKER_MACHINE_PATH}/bootkube:/data" \
+    -w /data \
+    "${BOOTKUBE_IMAGE}:${BOOTKUBE_VERSION}" \
+    /bootkube render \
+        --asset-dir=assets \
+        --network-provider=experimental-calico \
+        --api-servers=https://127.0.0.1:6443 \
+        --etcd-servers=http://127.0.0.1:12379 \
+        --pod-cidr=10.2.0.0/16 \
+        --service-cidr=10.3.0.0/16 \
+        --api-server-alt-names="IP=127.0.0.1,IP=$(docker-machine ip "${DOCKER_MACHINE_NAME}"),DNS=localhost" || true
+
+  # use defined version of k8s
+  grep -R -l 'image: k8s.gcr.io/hyperkube:' "${DOCKER_MACHINE_PATH}/bootkube/assets" \
+      | grep '.yaml$' \
+      | xargs -r -I{} sed -i -E "s#image: k8s.gcr.io/hyperkube:.*#image: k8s.gcr.io/hyperkube:${KUBERNETES_VERSION}#g" "{}" \
+  || true
+}
+
+function internal::localkube::bootkube::start() {
+  if [[ ! -d "${DOCKER_MACHINE_PATH}/bootkube" ]]; then
+    return 1
+  fi
+  docker run --rm \
+    --name bootkube-start \
+    --net=host \
+    -v /etc/kubernetes:/etc/kubernetes \
+    -v "${DOCKER_MACHINE_PATH}/bootkube/assets:/data" \
+    -w /data \
+    "${BOOTKUBE_IMAGE}:${BOOTKUBE_VERSION}" \
+      /bootkube start \
+        --asset-dir=/data
+}
+
+function internal::localkube::setup-vm() {
+  internal::docker-machine::run-sudo rm -rf /etc/kubernetes/manifests
+  internal::docker-machine::run-sudo mkdir -p /etc/kubernetes/manifests
+  cat "${DOCKER_MACHINE_PATH}/bootkube/assets/auth/kubeconfig-kubelet" | internal::docker-machine::run-sudo tee /etc/kubernetes/kubeconfig >/dev/null
+  cat "${DOCKER_MACHINE_PATH}/bootkube/assets/tls/ca.crt" | internal::docker-machine::run-sudo tee /etc/kubernetes/ca.crt >/dev/null
+}
+
+function internal::localkube::docker::etcd::start() {
+  if [[ ! -d "${DOCKER_MACHINE_PATH}/bootkube" ]]; then
+    return 1
+  fi
+
+  docker run \
+    -d \
+    --rm \
+    --name k8s-etcd \
+    --net=host \
+    -v /var/k8s-etcd/data:/var/etcd/data \
+    "${ETCD_IMAGE}:${ETCD_VERSION}" \
+      /usr/local/bin/etcd \
+        --name=k8s-etcd \
+        --listen-client-urls=http://0.0.0.0:12379 \
+        --listen-peer-urls=http://0.0.0.0:12380 \
+        --advertise-client-urls=http://127.0.0.1:12379 \
+        --initial-advertise-peer-urls=http://127.0.0.1:12380 \
+        --initial-cluster=k8s-etcd=http://127.0.0.1:12380 \
+        --initial-cluster-token=bootkube \
+        --initial-cluster-state=new \
+        --data-dir=/var/etcd/data \
+        --auto-compaction-retention=1
+}
+
+function internal::localkube::docker::kubelet::start() {
+  if [[ ! -d "${DOCKER_MACHINE_PATH}/bootkube" ]]; then
+    return 1
+  fi
+
+  docker run \
+    -d \
+    --rm \
+    --name kubelet \
+    --net=host \
+    --pid=host \
+    --privileged \
+    -v /dev:/dev \
+    -v /sys:/sys:rw \
+    -v /var/run:/var/run:rw \
+    -v /var/lib/docker/:/var/lib/docker:rw \
+    -v /var/lib/kubelet/:/var/lib/kubelet:shared \
+    -v /var/log:/var/log:shared \
+    -v /srv/kubernetes:/srv/kubernetes:rw \
+    -v /etc/kubernetes:/etc/kubernetes:rw \
+    -v /etc/resolv.conf:/etc/resolv.conf:ro \
+    -v /etc/hosts:/etc/hosts:ro \
+    -v /var/lib/cni:/var/lib/cni:rw \
+    -v /opt/cni/bin:/opt/cni/bin:rw \
+    "k8s.gcr.io/hyperkube:$(internal::localkube::rendered-k8s-version)" \
+      /hyperkube kubelet \
+        --anonymous-auth=false \
+        --authentication-token-webhook=true \
+        --authorization-mode=AlwaysAllow \
+        --cert-dir=/var/lib/kubelet/pki \
+        --cgroups-per-qos=false \
+        --client-ca-file=/etc/kubernetes/ca.crt \
+        --cluster_dns=10.3.0.10 \
+        --cluster_domain=cluster.local \
+        --cni-conf-dir=/etc/kubernetes/cni/net.d \
+        --enforce-node-allocatable= \
+        --eviction-hard='memory.available<5%,nodefs.available<10%' \
+        --eviction-soft='memory.available<7%,nodefs.available<20%' \
+        --eviction-soft-grace-period='memory.available=2m,nodefs.available=5m' \
+        --eviction-pressure-transition-period=5m \
+        --exit-on-lock-contention \
+        --kubeconfig=/etc/kubernetes/kubeconfig \
+        --lock-file=/var/run/lock/kubelet.lock \
+        --network-plugin=cni \
+        --node-labels='node-role.kubernetes.io/master,master=true' \
+        --pod-manifest-path=/etc/kubernetes/manifests \
+        --rotate-certificates
+}
+
+#===============================================================================
+# localkube functions
+#===============================================================================
+function localkube::start() {
+  internal::localkube::bootkube::render
+  internal::localkube::setup-vm
+  internal::localkube::docker::etcd::start
+  internal::localkube::docker::kubelet::start
+  internal::localkube::bootkube::start
+}
+
+function localkube::stop() {
+  internal::localkube::stop
+}
+
+function localkube::env() {
+  internal::localkube::env
+}
+
+function localkube::rm() {
+  internal::localkube::rm
+}
+
+#===============================================================================
+# Entrypoint
+#===============================================================================
+function main() {
+  # convience shortcut
+  case "${1:-}" in
+    start)
+      localkube::start
+    ;;
+    stop)
+      localkube::stop
+    ;;
+    rm)
+      localkube::rm
+    ;;
+    env)
+      internal::env
+    ;;
+    *)
+      echo "help text"
+    ;;
+  esac
+}
+
+#===============================================================================
+# Run Script
+#===============================================================================
+main "$@"
