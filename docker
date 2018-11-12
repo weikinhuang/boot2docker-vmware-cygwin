@@ -6,16 +6,16 @@
 #version            : 1.0.0
 #usage              : docker [args...]
 #requires           : cygpath/wslpath, fsutil, ssh, vmrun, vmware-vdiskmanager
-#==============================================================================
+#===============================================================================
 
 # Bash safemode
 # http://redsymbol.net/articles/unofficial-bash-strict-mode/
 set -euo pipefail
 IFS=$'\n\t'
 
-#==============================================================================
+#===============================================================================
 # Constants
-#==============================================================================
+#===============================================================================
 SELF="$0"
 SCRIPT_DIR="$(dirname "$(realpath "$SELF")")"
 
@@ -23,21 +23,12 @@ SCRIPT_DIR="$(dirname "$(realpath "$SELF")")"
 VERSION_BOOT2DOCKER="v18.09.0"
 VERSION_DOCKER_COMPOSE="1.23.1"
 
-# vmware info
-if [[ "$(uname -m)" == "x86_64" ]]; then
-  VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
-  VMFSTOOLS_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmware-vdiskmanager.exe'
-else
-  VMRUN_BIN='C:\Program Files\VMware\VMware Workstation\vmrun.exe'
-  VMFSTOOLS_BIN='C:\Program Files\VMware\VMware Workstation\vmware-vdiskmanager.exe'
-fi
-
 # storage
 DOCKER_CONFIG_HOME="${HOME}/.docker"
 
-#==============================================================================
+#===============================================================================
 # Translation functions
-#==============================================================================
+#===============================================================================
 IS_WSL="$([[ $(uname -s) == 'Linux' ]] && echo 1 || echo)"
 function internal::_winpath() {
   if [[ ${IS_WSL} == 1 ]]; then
@@ -78,9 +69,19 @@ function internal::get-documents-dir() {
     | sed "s#%USERPROFILE%#$(internal::get-expand-windows-var USERPROFILE | sed 's/\\/\\\\/g')#"
 }
 
-#==============================================================================
+#===============================================================================
 # Variables
-#==============================================================================
+#===============================================================================
+# vmware info
+if [[ "$(uname -m)" == "x86_64" ]] && [[ -e "$(internal::_unixpath 'C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe')" ]]; then
+  VMRUN_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe'
+  VMFSTOOLS_BIN='C:\Program Files (x86)\VMware\VMware Workstation\vmware-vdiskmanager.exe'
+else
+  VMRUN_BIN='C:\Program Files\VMware\VMware Workstation\vmrun.exe'
+  VMFSTOOLS_BIN='C:\Program Files\VMware\VMware Workstation\vmware-vdiskmanager.exe'
+fi
+
+# runtime variables
 MACHINE_STORAGE_PATH="${MACHINE_STORAGE_PATH:-"$(internal::_unixpath "$(internal::get-documents-dir)")/Virtual Machines"}"
 DOCKER_MACHINE_NAME="${DOCKER_MACHINE_NAME:-default}"
 DOCKER_MACHINE_VMPATH="$(internal::_winpath "$(realpath "${MACHINE_STORAGE_PATH}")")"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'\boot2docker-'"${DOCKER_MACHINE_NAME}"'.vmx'
@@ -93,9 +94,9 @@ SSH_OPTIONS=( -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o Con
 BOOT2DOCKER_USER_USER=docker
 BOOT2DOCKER_USER_PASSWD=tcuser
 
-#==============================================================================
+#===============================================================================
 # Internal functions
-#==============================================================================
+#===============================================================================
 function internal::list-fixed-drives() {
   local DRIVES="$("$(internal::_unixpath c:/)Windows/System32/cmd.exe" /c fsutil fsinfo drives \
     | tr -d '\r' \
@@ -173,9 +174,9 @@ function internal::include-plugin-from-machine() {
   internal::include-plugin "$(cat "${DOCKER_MACHINE_VMDIR}/machine-type")"
 }
 
-#==============================================================================
+#===============================================================================
 # Vmware workstation functions
-#==============================================================================
+#===============================================================================
 function vmware::generate-vmx() {
   cat <<-EOF
 .encoding = "windows-1252"
@@ -468,9 +469,9 @@ DOCKER_INIT
   echo -e "\033[0;32mReady\033[0m"
 }
 
-#==============================================================================
+#===============================================================================
 # docker internal functions
-#==============================================================================
+#===============================================================================
 function boot2docker::iso-url() {
   echo "https://github.com/boot2docker/boot2docker/releases/download/${VERSION_BOOT2DOCKER}/boot2docker.iso"
 }
@@ -529,9 +530,9 @@ function boot2docker::put() {
   scp -r "${SSH_OPTIONS[@]}" "${TARGET}" ${BOOT2DOCKER_USER_USER}@$(boot2docker::host):"${DEST}"
 }
 
-#==============================================================================
+#===============================================================================
 # docker functions
-#==============================================================================
+#===============================================================================
 function docker::cmd() {
   # always try to change the working directory to $PWD
   boot2docker::ssh cd $(printf '%q' "$(internal::hgfs-path "$(pwd)")") \&\>/dev/null\ \|\|\ true\ \; docker $(internal::escape-args "$@")
@@ -582,13 +583,17 @@ function docker::run() {
   docker::cmd run "${args[@]}"
 }
 
-#==============================================================================
+#===============================================================================
 # docker-compose functions
-#==============================================================================
+#===============================================================================
 
-#==============================================================================
+#===============================================================================
 # docker-machine functions
-#==============================================================================
+#===============================================================================
+function docker-machine::_path() {
+  echo "${DOCKER_MACHINE_VMDIR/%\//}"
+}
+
 function docker-machine::rm() {
   docker-machine::kill || true
   rm -rf "${DOCKER_MACHINE_VMDIR}"
@@ -739,9 +744,9 @@ function docker-machine::create() {
   echo ""
 }
 
-#==============================================================================
+#===============================================================================
 # Entrypoint
-#==============================================================================
+#===============================================================================
 function main::docker() {
   local SHELL_DOCKER_ACTION="$1"
   shift
@@ -836,7 +841,7 @@ function main::docker-machine() {
       # delegate back to an internal method with DOCKER_MACHINE_NAME environment variable
       exec env DOCKER_MACHINE_NAME="${machine}" docker machine "_${ACTION}_" "$@"
     ;;
-    env|htop|kill|ip|restart|rm|run|shrink|ssh|start|status|stop)
+    env|htop|kill|ip|_path|restart|rm|run|shrink|ssh|start|status|stop)
       # these take in an optional [machine-name=default]
       local machine="default"
       if docker-machine::exists "${1:-}"; then
@@ -846,7 +851,7 @@ function main::docker-machine() {
       # delegate back to an internal method with DOCKER_MACHINE_NAME environment variable
       exec env DOCKER_MACHINE_NAME="${machine}" docker machine "_${ACTION}_" "$@"
     ;;
-    _create_|_env_|_htop_|_kill_|_ip_|_restart_|_rm_|_run_|_shrink_|_ssh_|_start_|_status_|_stop_)
+    _create_|_env_|_htop_|_kill_|_ip_|__path_|_restart_|_rm_|_run_|_shrink_|_ssh_|_start_|_status_|_stop_)
       internal::include-plugin-from-machine
       local DELEGATED_ACTION="$(echo ${ACTION} | sed 's/^_//' | sed 's/_$//')"
       docker-machine::${DELEGATED_ACTION} "$@"
@@ -905,7 +910,7 @@ function main() {
   esac
 }
 
-#==============================================================================
+#===============================================================================
 # Run Script
-#==============================================================================
+#===============================================================================
 main "$@"
