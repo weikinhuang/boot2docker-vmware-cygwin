@@ -274,7 +274,7 @@ function main() {
       localkube::rm
     ;;
     env)
-      internal::env
+      localkube::env
     ;;
     *)
       echo "help text"
