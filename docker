@@ -815,9 +815,17 @@ function main::docker-compose() {
     VOLUMES+=( -v "${HOME_DIR}:$(internal::hgfs-path "${HOME_DIR}")" -v "${HOME_DIR}:/root") # mount $HOME in /root to share docker.config
   fi
 
+  # set up using local env for passthrough to docker-compose
+  local ENV_PASSTHROUGH=( )
+  local TMP_ENV
+  for TMP_ENV in $(compgen -v | grep -vE '^(COMPOSE_DIR|COMPOSE_FILE|COMPOSE_OPTIONS|DOCKER_.*|ENV_PASSTHROUGH|HOME_DIR|IFS|PATH|PWD|SHLVL|TMP_ENV|VOLUMES|WORKDIR|_)$'); do
+    ENV_PASSTHROUGH+=( -e "${TMP_ENV}=${!TMP_ENV:-}" )
+  done
+
   # remap working dir
   docker::run --rm \
     "${DOCKER_RUN_OPTIONS[@]}" \
+    "${ENV_PASSTHROUGH[@]}" \
     ${COMPOSE_OPTIONS} \
     "${VOLUMES[@]}" \
     -w "$(internal::hgfs-path "${WORKDIR}")" \
