@@ -159,6 +159,22 @@ function internal::localkube::setup-vm() {
   internal::docker-machine::run-sudo mkdir -p /etc/kubernetes/manifests
   cat "${DOCKER_MACHINE_PATH}/bootkube/assets/auth/kubeconfig-kubelet" | internal::docker-machine::run-sudo tee /etc/kubernetes/kubeconfig >/dev/null
   cat "${DOCKER_MACHINE_PATH}/bootkube/assets/tls/ca.crt" | internal::docker-machine::run-sudo tee /etc/kubernetes/ca.crt >/dev/null
+
+  # must add entry to hosts file otherwise the error:
+  # error: error upgrading connection: error dialing backend: dial tcp: lookup boot2docker-default on 192.168.8.2:53: no such host
+  # will happen, see https://github.com/kubernetes/kubernetes/issues/22770
+  #internal::docker-machine::run cat /etc/hosts
+  local TMP_HOSTS="$(internal::docker-machine::run cat /etc/hosts)"
+  local DM_HOSTNAME="$(internal::docker-machine::run hostname | tr -d "\r" | tr -d "\n")"
+  local DM_IP="$(docker-machine ip "${DOCKER_MACHINE_NAME}")"
+  if ! echo "${TMP_HOSTS}" | grep -q "${DM_HOSTNAME}"; then
+    # no entry found for hostname
+    echo "${DM_IP} ${DM_HOSTNAME}" | internal::docker-machine::run-sudo tee -a /etc/hosts >/dev/null
+  elif ! echo "${TMP_HOSTS}" | grep -q "${DM_IP} ${DM_HOSTNAME}"; then
+    # entry for hostname found, but incorrect ip
+    echo "${TMP_HOSTS}" | grep -v "${DM_HOSTNAME}" | internal::docker-machine::run-sudo tee /etc/hosts >/dev/null
+    echo "${DM_IP} ${DM_HOSTNAME}" | internal::docker-machine::run-sudo tee -a /etc/hosts >/dev/null
+  fi
 }
 
 function internal::localkube::docker::etcd::start() {
@@ -230,6 +246,7 @@ function internal::localkube::docker::kubelet::start() {
         --kubeconfig=/etc/kubernetes/kubeconfig \
         --lock-file=/var/run/lock/kubelet.lock \
         --network-plugin=cni \
+        --node-ip=$(docker-machine ip "${DOCKER_MACHINE_NAME}") \
         --node-labels='node-role.kubernetes.io/master,master=true' \
         --pod-manifest-path=/etc/kubernetes/manifests \
         --rotate-certificates
