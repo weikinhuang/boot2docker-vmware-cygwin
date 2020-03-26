@@ -1,0 +1,125 @@
+#!/bin/bash -
+#title              : docker
+#description        : This script emulates docker, docker-compose, and docker-machine on a cygwin based system
+#author             : Wei Kin Huang
+#date               : 2017-09-03
+#version            : 1.0.0
+#usage              : docker [args...]
+#requires           : cygpath/wslpath, fsutil, ssh, vmrun, vmware-vdiskmanager
+#===============================================================================
+
+#===============================================================================
+# Variables
+#===============================================================================
+# ssh options
+BOOT2DOCKER_USER_USER=core
+
+#===============================================================================
+# Vmware workstation functions
+#===============================================================================
+function vmware::create-vm() {
+  # allow differently sized vms
+  local VMDK_SIZE="${VMDK_SIZE-16GB}"
+  local VMEM_SIZE="${VMEM_SIZE-2048}"
+  local VMX_FILE="${DOCKER_MACHINE_VMDIR}/boot2docker-${DOCKER_MACHINE_NAME}.vmx"
+  local DOCKER_DAEMON_OPTS="${1:-}"
+
+  export WSLENV="${WSLENV}:PACKER_DEBUG:PACKER_VMWARE_OUTPUT_DIRECTORY"
+  ( \
+    cd ~/Projects/docker-vm/ \
+    && \
+      PACKER_VMWARE_OUTPUT_DIRECTORY="$(wslpath -w "$(dirname "${DOCKER_MACHINE_VMDIR}")")/boot2docker-${DOCKER_MACHINE_NAME}" \
+      MACHINE_NAME="boot2docker-${DOCKER_MACHINE_NAME}" \
+      make build \
+  )
+
+  ( cd "${DOCKER_MACHINE_VMDIR}"; "$(internal::_unixpath "${VMFSTOOLS_BIN}")" -x "${VMDK_SIZE}" "disk.vmdk" )
+
+  # allow access to all cores
+  local PROC_CORES=$(grep "^processor" -c /proc/cpuinfo)
+  sed -i 's/numvcpus = "[0-9]"/numvcpus = "'${PROC_CORES}'"/' "${VMX_FILE}"
+  sed -i 's/cpuid.coresPerSocket = "[0-9]"/cpuid.coresPerSocket = "'${PROC_CORES}'"/' "${VMX_FILE}"
+  sed -i 's/^memsize = "2048"/memsize = "'${VMEM_SIZE}'"/' "${VMX_FILE}"
+
+  # set up shared folders
+  local COUNTER drive
+  COUNTER=0
+  for drive in $(internal::list-fixed-drives); do
+    echo 'sharedFolder'${COUNTER}'.present = "TRUE"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.enabled = "TRUE"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.readAccess = "TRUE"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.writeAccess = "TRUE"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.hostPath = "'${drive}'"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.guestName = "'$(echo "${drive}" | cut -d ':' -f 1 | tr '[:upper:]' '[:lower:]')'"' >> "${VMX_FILE}"
+    echo 'sharedFolder'${COUNTER}'.expiration = "never"' >> "${VMX_FILE}"
+    (( COUNTER += 1 ))
+  done
+  echo 'sharedFolder.maxNum = "'${COUNTER}'"' >> "${VMX_FILE}"
+
+  # generate ssh key
+  ssh-keygen -t rsa -N "" -C "SSH for boot2docker ${DOCKER_MACHINE_NAME}" -f "${DOCKER_MACHINE_VMDIR}/docker_id_rsa"
+  local ID_RSA_PUB="$(cat "${DOCKER_MACHINE_VMDIR}/docker_id_rsa.pub" | tr -d '\n' | cut -d ' ' -f 1,2)"
+
+  CLOUD_CONFIG_METADATA="$(cat <<-EOF
+#cloud-config
+network:
+  version: 2
+  ethernets:
+    nics:
+      match:
+        name: ens*
+      dhcp4: true
+EOF
+)"
+  CLOUD_CONFIG_USERDATA="$(cat <<-EOF
+#cloud-config
+# https://cloudinit.readthedocs.io/en/latest/topics/network-config-format-v2.html
+fqdn: boot2docker-${DOCKER_MACHINE_NAME}
+manage_etc_hosts: true
+preserve_hostname: false
+
+users:
+  - name: core
+    ssh_authorized_keys:
+      - "${ID_RSA_PUB}"
+
+write_files:
+  - path: /etc/systemd/system/docker.service.d/00-daemon-opts.conf
+    content: |
+      [Service]
+      Environment="DOCKER_OPTS=${DOCKER_DAEMON_OPTS}"
+EOF
+)"
+
+METADATA="$(echo "${CLOUD_CONFIG_METADATA}" | gzip -c9 | { base64 -w0 2>/dev/null || base64; })"
+USERDATA="$(echo "${CLOUD_CONFIG_USERDATA}" | gzip -c9 | { base64 -w0 2>/dev/null || base64; })"
+
+# Update CoreOS VMX to include cloud config data
+# https://github.com/coreos/coreos-cloudinit/blob/master/Documentation/vmware-guestinfo.md
+cat >> "${VMX_FILE}" << __CLOUD_CONFIG_DATA__
+guestinfo.hostname = "boot2docker-${DOCKER_MACHINE_NAME}"
+guestinfo.metadata = "${METADATA}"
+guestinfo.metadata.encoding = "gzip+base64"
+guestinfo.userdata = "${USERDATA}"
+guestinfo.userdata.encoding = "gzip+base64"
+__CLOUD_CONFIG_DATA__
+
+  # fix cygwin permissions...
+  if type setfacl &>/dev/null; then
+    setfacl -b "${DOCKER_MACHINE_VMDIR}"
+  fi
+  chmod -R 755 "${DOCKER_MACHINE_VMDIR}"
+  chmod 600 "${DOCKER_MACHINE_VMDIR}/docker_id_rsa"
+  sleep 2
+}
+
+function vmware::init-machine() {
+  return 0
+}
+
+#===============================================================================
+# docker internal functions
+#===============================================================================
+function boot2docker::download-iso() {
+  return 0
+}
