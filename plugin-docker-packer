@@ -123,3 +123,21 @@ function vmware::init-machine() {
 function boot2docker::download-iso() {
   return 0
 }
+
+#===============================================================================
+# docker-compose functions
+#===============================================================================
+# docker-compose is installed natively
+function main::docker-compose() {
+  # set up using local env for passthrough to docker-compose
+  local ENV_PASSTHROUGH=( )
+  local TMP_ENV
+  for TMP_ENV in $(compgen -v | grep -vE '^(BASH.*|COMPOSE_DIR|COMPOSE_FILE|COMPOSE_OPTIONS|DOCKER_.*|ENV_PASSTHROUGH|HOME_DIR|IFS|PATH|PWD|SHLVL|TMP_ENV|VOLUMES|WORKDIR|_)$'); do
+    if [[ "${!TMP_ENV:-}" == /* ]] && internal::is-win-host-path "${!TMP_ENV:-}"; then
+      ENV_PASSTHROUGH+=( "${TMP_ENV}=$(internal::hgfs-path "${!TMP_ENV:-}")" )
+    else
+      ENV_PASSTHROUGH+=( "${TMP_ENV}=${!TMP_ENV:-}" )
+    fi
+  done
+  boot2docker::ssh cd $(printf '%q' "$(internal::hgfs-path "$(pwd)")") \&\>/dev/null\ \|\|\ true\ \; env "$(internal::escape-args "${ENV_PASSTHROUGH[@]}")" docker-compose $(internal::escape-args "$@")
+}
